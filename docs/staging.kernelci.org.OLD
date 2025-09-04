@@ -1,0 +1,241 @@
+#!/bin/dash
+
+# Periodic job run on staging.kernelci.org to merge together all the pending
+# PRs and update the staging.kernelci.org branches, then update Docker images
+# and trigger a full build/test cycle with a kernel branch based on linux-next.
+
+set -e
+
+# Trap function for errors
+ABSPATH=$(readlink -f "$0")
+ABSDIR=$(dirname "$ABSPATH")
+PIDFILE="/tmp/staging.kernelci.org.pid"
+
+crash() {
+    local exit_code="$?"
+    # If exit code is 0, then it's not an error
+    [ "$exit_code" -eq 0 ] && exit 0
+    # Generate syslog message
+    logger -t kernelci-deploy "Error in script $0"
+    # remove pidfile
+    rm -f $PIDFILE
+    exit $exit_code
+}
+
+trap 'crash' EXIT
+
+# verify if the script is already running
+if [ -f $PIDFILE ]; then
+    pid=$(cat $PIDFILE)
+    if [ -d /proc/$pid ]; then
+        echo "Script already running with pid $pid"
+        exit 1
+    else
+        echo "Removing stale pidfile"
+        rm -f $PIDFILE
+    fi
+fi
+
+# create pidfile
+echo $$ > $PIDFILE
+
+cmd_pull() {
+    echo "Updating local repository"
+    git pull --ff-only
+}
+
+# TODO: Add update of test definitions
+
+cmd_kernel() {
+    tree="${1:-next}"
+
+    echo "Pushing kernel test branch for ${tree}"
+
+    case $tree in
+        next)
+            url=https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git
+            branch=master
+            ;;
+        mainline)
+            url=https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+            branch=master
+            ;;
+        stable)
+            url=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
+            branch=linux-6.13.y
+            ;;
+        *)
+            echo "Unknown tree"
+            exit 1
+            ;;
+    esac
+
+    ./kernel.py \
+        --push \
+        --ssh-key=keys/id_rsa_staging.kernelci.org \
+        --from-url=$url \
+        --from-branch=$branch \
+        --branch=staging-"$tree" \
+        --tag-prefix=staging-"$tree"-
+}
+
+cmd_rotate_tree() {
+    if [ -e .tree ]; then
+        last=$(cat .tree)
+    else
+        last=
+    fi
+
+    case $last in
+        next)
+            tree=mainline
+            ;;
+        mainline)
+            tree=stable
+            ;;
+        stable)
+            tree=next
+            ;;
+        *)
+            tree=next
+            ;;
+    esac
+
+    echo $tree > .tree
+    echo $tree
+}
+
+docker_workaround() {
+    echo "Restarting containerd and docker"
+    sudo systemctl restart containerd docker
+    echo "Waiting 5 seconds for services to restart"
+    sleep 5
+    ~/run-dozzle
+}
+
+cmd_api_pipeline() {
+    compose_files="\
+-f docker-compose.yaml \
+-f docker-compose-kcidb.yaml \
+-f docker-compose-lava.yaml \
+-f docker-compose-production.yaml \
+"
+    api_services="api db redis"
+    echo "Stopping pipeline containers"
+    cd checkout/kernelci-pipeline
+    git prune
+    git fetch origin
+    git checkout origin/staging.kernelci.org
+    echo "Pulling pipeline containers"
+    docker-compose $compose_files pull
+    set +e
+    docker-compose $compose_files down --remove-orphans
+    # verify if it failed due orphaned network bug
+    if [ $? -ne 0 ]; then
+        echo "Failed to stop pipeline containers, restarting containerd and docker"
+        docker_workaround
+        echo "Attempting to restart pipeline containers again"
+        set -e
+        docker-compose $compose_files down --remove-orphans
+    fi
+    set -e
+    cd -
+
+    #./pending.py kernelci-api --push
+    echo "Pulling API containers"
+    cd checkout/kernelci-api
+    git prune
+    git fetch origin
+    git checkout origin/staging.kernelci.org
+    docker-compose pull $api_services
+    echo "Stopping API containers"
+    set +e
+    docker-compose down
+    # verify if it failed due orphaned network bug
+    if [ $? -ne 0 ]; then
+        echo "Failed to stop API containers, restarting containerd and docker"
+        docker_workaround
+        echo "Attempting to restart API containers again"
+        set -e
+        docker-compose down
+    fi
+    set -e
+    echo "Starting API containers"
+    docker-compose up -d $api_services
+    cd -
+
+    cd checkout/kernelci-pipeline
+    #REQUIREMENTS=requirements-dev.txt docker-compose $compose_files build --no-cache
+    echo "Starting pipeline containers"
+    SETTINGS=/home/kernelci/config/staging.kernelci.org.secrets.toml \
+            docker-compose $compose_files up -d
+    cd -
+}
+
+cmd_ghworkflow() {
+    # fail if .github_token is not set
+    GH_TOKEN=$(cat .github_token)
+    if [ -z "$GH_TOKEN" ]; then
+        echo "GH_TOKEN is not set"
+        # The fine-grained token must have the following permission set:
+        # "Actions" repository permissions (write)
+        exit 1
+    fi
+
+    # trigger the workflow
+    echo "Triggering workflow"
+    curl -L \
+    -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: Bearer $GH_TOKEN" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    https://api.github.com/repos/kernelci/kernelci-core/actions/workflows/staging.yml/dispatches \
+    -d '{"ref":"main","inputs":{}}'
+
+    # wait for the workflow to finish
+    while true; do
+        echo "Waiting for workflow to finish... (60 seconds)"
+        sleep 60
+        status=$(curl -s -X GET "https://api.github.com/repos/kernelci/kernelci-core/actions/workflows/staging.yml/runs" | jq -r '.workflow_runs[0].status')
+        if [ "$status" = "completed" ]; then
+            break
+        fi
+    done
+}
+
+cmd_all() {
+    tree="$1"
+
+    [ -z $tree ] && tree=$(cmd_rotate_tree)
+    echo "Kernel tree: $tree"
+    cmd_ghworkflow
+    cmd_pull
+    #cmd_jenkins
+    #cmd_core
+    #cmd_api
+    #cmd_pipeline
+    #cmd_bootrr
+    #cmd_buildroot
+    #cmd_test_definitions
+    #cmd_kcidb
+    #cmd_backend
+    #cmd_frontend
+    cmd_kernel $tree
+    #cmd_docker
+    #cmd_monitor
+    cmd_api_pipeline
+}
+
+cmd="${1}"
+
+if [ -n "$cmd" ]; then
+    shift 1
+else
+    cmd="all"
+fi
+
+"cmd_"$cmd $@
+
+# remove pidfile
+rm -f $PIDFILE
+exit 0
