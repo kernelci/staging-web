@@ -78,6 +78,11 @@ class StagingOrchestrator:
     async def process_single_staging_run(self, staging_run: StagingRun, db: Session):
         """Process a single staging run through its steps"""
         try:
+            # Skip processing if staging run is cancelled
+            if staging_run.status == StagingRunStatus.CANCELLED:
+                print(f"Skipping processing of cancelled staging run {staging_run.id}")
+                return
+            
             # Get current step or create initial steps if none exist
             if not staging_run.steps:
                 await self.initialize_staging_steps(staging_run, db)
@@ -302,9 +307,33 @@ class StagingOrchestrator:
             db.commit()
             
             try:
-                # Determine kernel tree (rotate or use specified)
-                kernel_tree = staging_run.kernel_tree or self.kernel_manager.rotate_tree()
-                staging_run.kernel_tree = kernel_tree
+                # Handle special keywords
+                if staging_run.kernel_tree == "none":
+                    # Skip kernel tree update entirely
+                    step.status = StagingStepStatus.SKIPPED
+                    step.end_time = datetime.utcnow()
+                    step.info_message = "Kernel tree update skipped (None selected)"
+                    step.details = json.dumps({"skipped": True, "reason": "User selected 'None' option"})
+                    print(f"DEBUG: Skipping kernel tree update for staging run {staging_run.id}")
+                    db.commit()
+                    return
+                elif staging_run.kernel_tree == "auto":
+                    # Auto rotation - select next tree in rotation
+                    kernel_tree = self.kernel_manager.rotate_tree()
+                    staging_run.kernel_tree = kernel_tree  # Update to actual selected tree
+                    print(f"DEBUG: Auto rotation selected kernel tree: {kernel_tree}")
+                elif staging_run.kernel_tree in ["next", "mainline", "stable"]:
+                    # Use specifically selected tree
+                    kernel_tree = staging_run.kernel_tree
+                    print(f"DEBUG: Using specifically selected kernel tree: {kernel_tree}")
+                else:
+                    # This should not happen due to validation in main.py, but handle it
+                    step.status = StagingStepStatus.FAILED
+                    step.end_time = datetime.utcnow()
+                    step.error_message = f"Invalid kernel tree configuration: {staging_run.kernel_tree}"
+                    print(f"ERROR: Invalid kernel tree value in staging run {staging_run.id}: {staging_run.kernel_tree}")
+                    db.commit()
+                    return
                 
                 # Update kernel tree
                 result = await self.kernel_manager.update_kernel_tree(kernel_tree)

@@ -8,8 +8,10 @@ import asyncio
 from config import GITHUB_REPO, GITHUB_WORKFLOW, GITHUB_REF, WORKFLOW_TIMEOUT_MINUTES, WORKFLOW_CHECK_INTERVAL_SECONDS
 
 class GitHubWorkflowManager:
-    def __init__(self, token: str):
+    def __init__(self, token: str, repo: str = None, workflow: str = None):
         self.token = token
+        self.repo = repo or GITHUB_REPO
+        self.workflow = workflow or GITHUB_WORKFLOW
         self.base_url = "https://api.github.com"
         self.headers = {
             "Accept": "application/vnd.github+json",
@@ -17,10 +19,14 @@ class GitHubWorkflowManager:
             "X-GitHub-Api-Version": "2022-11-28"
         }
     
-    async def trigger_workflow(self, repo: str = GITHUB_REPO, workflow: str = GITHUB_WORKFLOW, ref: str = GITHUB_REF) -> Optional[str]:
+    async def trigger_workflow(self, repo: str = None, workflow: str = None, ref: str = GITHUB_REF) -> Optional[str]:
         """
         Trigger GitHub workflow and return the workflow run ID
         """
+        # Use instance defaults if not provided
+        repo = repo or self.repo
+        workflow = workflow or self.workflow
+        
         # First check for existing running workflows
         existing_runs = await self.get_running_workflows(repo, workflow)
         if existing_runs:
@@ -291,3 +297,38 @@ class GitHubWorkflowManager:
         except Exception as e:
             print(f"Failed to get workflow jobs: {e}")
             return {"total": 0, "success": 0, "failure": 0, "cancelled": 0, "skipped": 0}
+    
+    async def cancel_workflow_run(self, run_id: str, repo: str = None) -> bool:
+        """
+        Cancel a GitHub workflow run
+        
+        Args:
+            run_id: The workflow run ID to cancel
+            repo: Repository in format "owner/repo" (defaults to configured repo)
+            
+        Returns:
+            bool: True if cancellation was successful, False otherwise
+        """
+        if not repo:
+            repo = self.repo
+            
+        url = f"{self.base_url}/repos/{repo}/actions/runs/{run_id}/cancel"
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers)
+                response.raise_for_status()
+                print(f"Successfully cancelled GitHub workflow run {run_id}")
+                return True
+                
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 202:
+                # 202 Accepted means cancellation was accepted
+                print(f"GitHub workflow run {run_id} cancellation accepted")
+                return True
+            else:
+                print(f"Failed to cancel workflow run {run_id}: HTTP {e.response.status_code}")
+                return False
+        except Exception as e:
+            print(f"Failed to cancel workflow run {run_id}: {e}")
+            return False

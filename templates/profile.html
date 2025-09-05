@@ -79,24 +79,91 @@ document.addEventListener('DOMContentLoaded', function() {
     const profileBtn = document.getElementById('profileBtn');
     
     if (profileForm && typeof window.AjaxLoader !== 'undefined') {
-        profileForm.addEventListener('submit', function(e) {
+        profileForm.addEventListener('submit', async function(e) {
+            e.preventDefault(); // Prevent default form submission
+            
             // Show loading indicator
             AjaxLoader.show('Updating password...');
             
-            // Update button text but don't disable form elements yet
-            // to allow form data to be submitted
+            // Update button text
             if (profileBtn) {
                 profileBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Updating...';
             }
             
-            // Disable form elements after a short delay to ensure form submits
-            setTimeout(function() {
-                const formElements = profileForm.querySelectorAll('input, button');
-                formElements.forEach(element => {
-                    element.disabled = true;
+            // Disable form elements
+            const formElements = profileForm.querySelectorAll('input, button');
+            formElements.forEach(element => {
+                element.disabled = true;
+            });
+            
+            try {
+                // Get form data
+                const currentPassword = document.getElementById('current_password').value;
+                const newPassword = document.getElementById('new_password').value;
+                
+                // Send JSON request
+                const response = await fetch('/api/profile/change-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        current_password: currentPassword,
+                        new_password: newPassword
+                    })
                 });
-            }, 100);
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    // Show success message
+                    showAlert('success', result.message || 'Password updated successfully');
+                    // Clear form
+                    profileForm.reset();
+                } else {
+                    // Show error message
+                    showAlert('error', result.error || result.detail || 'Failed to update password');
+                }
+            } catch (error) {
+                console.error('Error updating password:', error);
+                showAlert('error', 'Network error occurred while updating password');
+            } finally {
+                // Hide loading indicator
+                AjaxLoader.hide();
+                
+                // Re-enable form elements
+                formElements.forEach(element => {
+                    element.disabled = false;
+                });
+                
+                // Reset button text
+                if (profileBtn) {
+                    profileBtn.innerHTML = '<i class="fas fa-save me-2"></i>Update Password';
+                }
+            }
         });
+    }
+    
+    function showAlert(type, message) {
+        // Remove existing alerts
+        const existingAlerts = document.querySelectorAll('.alert');
+        existingAlerts.forEach(alert => alert.remove());
+        
+        // Create new alert
+        const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+        const icon = type === 'success' ? 'fas fa-check' : 'fas fa-exclamation-triangle';
+        
+        const alertHtml = `
+            <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                <i class="${icon} me-2"></i>${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `;
+        
+        // Insert alert at the top of the card body
+        const cardBody = document.querySelector('.card-body');
+        cardBody.insertAdjacentHTML('afterbegin', alertHtml);
     }
 });
 </script>

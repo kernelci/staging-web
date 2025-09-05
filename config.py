@@ -75,9 +75,9 @@ DEFAULT_ADMIN_USERNAME = config["default_admin"]["username"]
 DEFAULT_ADMIN_PASSWORD = config["default_admin"]["password"]
 DEFAULT_ADMIN_EMAIL = config["default_admin"]["email"]
 
-# Settings Keys
+# Settings Keys - hardcoded database keys for runtime settings
 SETTINGS_KEYS = {
-    "GITHUB_TOKEN": config["settings_keys"]["github_token"],
-    "DISCORD_WEBHOOK_URL": config["settings_keys"]["discord_webhook_url"],
-    "SKIP_SELF_UPDATE": config["settings_keys"]["skip_self_update"],
+    "GITHUB_TOKEN": "github_token",
+    "DISCORD_WEBHOOK_URL": "discord_webhook_url", 
+    "SKIP_SELF_UPDATE": "skip_self_update",
 }

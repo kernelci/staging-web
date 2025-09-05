@@ -25,6 +25,10 @@
                                 <span class="badge bg-danger fs-6">
                                     <i class="fas fa-times me-1"></i>Failed
                                 </span>
+                            {% elif latest_run.status.value == 'cancelled' %}
+                                <span class="badge bg-warning fs-6">
+                                    <i class="fas fa-ban me-1"></i>Cancelled
+                                </span>
                             {% else %}
                                 <span class="badge bg-secondary fs-6">
                                     <i class="fas fa-clock me-1"></i>{{ latest_run.status.value.title() }}
@@ -42,9 +46,15 @@
                         <div class="col-md-3">
                             <h6>Kernel Tree</h6>
                             {% if latest_run.kernel_tree %}
-                                <span class="badge bg-secondary">{{ latest_run.kernel_tree }}</span>
+                                {% if latest_run.kernel_tree == "none" %}
+                                    <span class="badge bg-warning text-dark">None (Skipped)</span>
+                                {% elif latest_run.kernel_tree == "auto" %}
+                                    <span class="badge bg-info text-dark">Auto (Rotating)</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ latest_run.kernel_tree }}</span>
+                                {% endif %}
                             {% else %}
-                                <span class="text-muted">Auto</span>
+                                <span class="text-muted">Unknown</span>
                             {% endif %}
                         </div>
                         <div class="col-md-3">
@@ -79,6 +89,9 @@
                                     </div>
                                     <div class="flex-grow-1">
                                         <strong>{{ step.step_type.value.replace('_', ' ').title() }}</strong>
+                                        {% if step.info_message %}
+                                            <br><small class="text-warning"><i class="fas fa-info-circle me-1"></i>{{ step.info_message }}</small>
+                                        {% endif %}
                                         {% if step.error_message %}
                                             {% if 'Partial success' in step.error_message %}
                                                 <br><small class="text-warning">{{ step.error_message }}</small>
@@ -137,27 +150,36 @@
                     <strong>Staging run #{{ running_staging.id }} is currently running.</strong><br>
                     <small>Cannot start a new run while another is in progress.</small>
                     <div class="mt-2">
-                        <a href="/staging/{{ running_staging.id }}" class="btn btn-outline-primary">
+                        <a href="/staging/{{ running_staging.id }}" class="btn btn-outline-primary me-2">
                             <i class="fas fa-eye me-1"></i>View Current Run
                         </a>
+                        {% if user.role.value in ['admin', 'maintainer'] or user.id == running_staging.user_id %}
+                        <form method="post" action="/staging/{{ running_staging.id }}/cancel" class="d-inline">
+                            <button type="submit" class="btn btn-outline-danger btn-sm" 
+                                    onclick="return confirm('Are you sure you want to cancel this staging run?')">
+                                <i class="fas fa-times me-1"></i>Cancel Run
+                            </button>
+                        </form>
+                        {% endif %}
                     </div>
                 </div>
                 {% else %}
-                <form method="post" action="/staging/trigger" id="stagingTriggerForm">
+                <div id="stagingTriggerForm">
                     <div class="mb-3">
                         <label for="kernel_tree" class="form-label">Kernel Tree</label>
                         <select class="form-select" name="kernel_tree" id="kernel_tree">
                             <option value="auto">Auto (Rotate)</option>
+                            <option value="none">None (Skip kernel tree update)</option>
                             <option value="next">Linux Next</option>
                             <option value="mainline">Linux Mainline</option>
                             <option value="stable">Linux Stable</option>
                         </select>
                     </div>
                     
-                    <button type="submit" class="btn btn-primary w-100" id="stagingTriggerBtn">
+                    <button type="button" class="btn btn-primary w-100" id="stagingTriggerBtn" onclick="triggerStagingRun()">
                         <i class="fas fa-rocket me-2"></i>Trigger Staging Run
                     </button>
-                </form>
+                </div>
                 {% endif %}
             </div>
         </div>
@@ -194,9 +216,15 @@
                                 <td>{{ run.user.username }}</td>
                                 <td>
                                     {% if run.kernel_tree %}
-                                        <span class="badge bg-secondary">{{ run.kernel_tree }}</span>
+                                        {% if run.kernel_tree == "none" %}
+                                            <span class="badge bg-warning text-dark">None</span>
+                                        {% elif run.kernel_tree == "auto" %}
+                                            <span class="badge bg-info text-dark">Auto</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ run.kernel_tree }}</span>
+                                        {% endif %}
                                     {% else %}
-                                        <span class="text-muted">Auto</span>
+                                        <span class="text-muted">Unknown</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ run.start_time.strftime('%m/%d %H:%M') }}</td>
@@ -219,6 +247,10 @@
                                     {% elif run.status.value == 'failed' %}
                                         <span class="badge bg-danger">
                                             <i class="fas fa-times me-1"></i>Failed
+                                        </span>
+                                    {% elif run.status.value == 'cancelled' %}
+                                        <span class="badge bg-warning">
+                                            <i class="fas fa-ban me-1"></i>Cancelled
                                         </span>
                                     {% else %}
                                         <span class="badge bg-secondary">
@@ -267,28 +299,68 @@ setTimeout(function() {
 
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Add loading to staging trigger form
-    const stagingForm = document.getElementById('stagingTriggerForm');
-    const stagingBtn = document.getElementById('stagingTriggerBtn');
+async function triggerStagingRun() {
+    const kernelTreeSelect = document.getElementById('kernel_tree');
+    const triggerBtn = document.getElementById('stagingTriggerBtn');
     
-    if (stagingForm && typeof window.AjaxLoader !== 'undefined') {
-        stagingForm.addEventListener('submit', function(e) {
-            // Show loading animation
-            AjaxLoader.show('Starting Staging Run...');
-            
-            // Disable form elements
-            const formElements = stagingForm.querySelectorAll('input, select, button');
-            formElements.forEach(element => {
-                element.disabled = true;
-            });
-            
-            // Update button text
-            if (stagingBtn) {
-                stagingBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Starting...';
-            }
-        });
+    if (!kernelTreeSelect || !triggerBtn) {
+        console.error('Form elements not found');
+        return;
     }
+    
+    const kernelTree = kernelTreeSelect.value;
+    console.log('DEBUG: Selected kernel tree:', kernelTree);
+    
+    // Disable button and show loading
+    triggerBtn.disabled = true;
+    triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Starting...';
+    
+    // Show loading animation if available
+    if (typeof window.AjaxLoader !== 'undefined') {
+        AjaxLoader.show('Starting Staging Run...');
+    }
+    
+    try {
+        const response = await fetch('/api/staging/trigger', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                kernel_tree: kernelTree
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            // Success - redirect to staging run detail
+            window.location.href = `/staging/${data.staging_run_id}`;
+        } else {
+            // Error - show message
+            alert(`Error: ${data.detail || 'Failed to start staging run'}`);
+            
+            // Reset button
+            triggerBtn.disabled = false;
+            triggerBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Trigger Staging Run';
+        }
+    } catch (error) {
+        console.error('Error triggering staging run:', error);
+        alert('Network error: Failed to start staging run');
+        
+        // Reset button
+        triggerBtn.disabled = false;
+        triggerBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Trigger Staging Run';
+    } finally {
+        // Hide loading animation
+        if (typeof window.AjaxLoader !== 'undefined') {
+            AjaxLoader.hide();
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Dashboard loaded - AJAX staging trigger ready');
 });
 </script>
 
