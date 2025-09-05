@@ -1,3 +1,7 @@
+# Copyright (C) 2025 Collabora Limited
+# Author: Denys Fedoryshchenko <denys.f@collabora.com>
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 from models import Base, User, UserRole, Settings
