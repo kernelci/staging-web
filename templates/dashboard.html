@@ -42,7 +42,11 @@
                         <div class="col-md-3">
                             <h6>Kernel Tree</h6>
                             {% if latest_run.kernel_tree %}
-                                <span class="badge bg-secondary">{{ latest_run.kernel_tree }}</span>
+                                {% if latest_run.kernel_tree == "none" %}
+                                    <span class="badge bg-warning text-dark">None (Skipped)</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ latest_run.kernel_tree }}</span>
+                                {% endif %}
                             {% else %}
                                 <span class="text-muted">Auto</span>
                             {% endif %}
@@ -148,6 +152,7 @@
                         <label for="kernel_tree" class="form-label">Kernel Tree</label>
                         <select class="form-select" name="kernel_tree" id="kernel_tree">
                             <option value="auto">Auto (Rotate)</option>
+                            <option value="none">None (Skip kernel tree update)</option>
                             <option value="next">Linux Next</option>
                             <option value="mainline">Linux Mainline</option>
                             <option value="stable">Linux Stable</option>
@@ -194,7 +199,11 @@
                                 <td>{{ run.user.username }}</td>
                                 <td>
                                     {% if run.kernel_tree %}
-                                        <span class="badge bg-secondary">{{ run.kernel_tree }}</span>
+                                        {% if run.kernel_tree == "none" %}
+                                            <span class="badge bg-warning text-dark">None</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ run.kernel_tree }}</span>
+                                        {% endif %}
                                     {% else %}
                                         <span class="text-muted">Auto</span>
                                     {% endif %}

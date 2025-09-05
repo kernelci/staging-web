@@ -588,14 +588,25 @@ async def trigger_staging(
         return RedirectResponse(url=f"/staging/{running_staging.id}?error=already_running", status_code=302)
     
     try:
-        print(f"User '{current_user.username}' triggered staging run (kernel_tree={kernel_tree}) from IP {real_ip}")
+        print(f"User '{current_user.username}' triggered staging run (kernel_tree='{kernel_tree}') from IP {real_ip}")
+        print(f"DEBUG: Received kernel_tree value: '{kernel_tree}' (type: {type(kernel_tree)})")
         
         # Create new staging run record
+        # Determine kernel_tree value to store
+        if kernel_tree == "none":
+            db_kernel_tree = "none"
+        elif kernel_tree == "auto":
+            db_kernel_tree = None  # Auto rotation
+        else:
+            db_kernel_tree = kernel_tree  # Specific tree (next, mainline, stable)
+        
+        print(f"DEBUG: Storing kernel_tree in database as: '{db_kernel_tree}'")
+        
         staging_run = StagingRun(
             user_id=current_user.id,
             status=StagingRunStatus.RUNNING,
             initiated_via="manual",
-            kernel_tree=kernel_tree if kernel_tree != "auto" else None
+            kernel_tree=db_kernel_tree
         )
         db.add(staging_run)
         db.flush()  # Get the ID without committing

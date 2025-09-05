@@ -302,6 +302,15 @@ class StagingOrchestrator:
             db.commit()
             
             try:
+                # Check if kernel tree update should be skipped
+                if staging_run.kernel_tree == "none":
+                    step.status = StagingStepStatus.SKIPPED
+                    step.end_time = datetime.utcnow()
+                    step.error_message = "Kernel tree update skipped (None selected)"
+                    step.details = json.dumps({"skipped": True, "reason": "User selected 'None' option"})
+                    db.commit()
+                    return
+                
                 # Determine kernel tree (rotate or use specified)
                 kernel_tree = staging_run.kernel_tree or self.kernel_manager.rotate_tree()
                 staging_run.kernel_tree = kernel_tree

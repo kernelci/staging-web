@@ -48,7 +48,11 @@
                     <div class="col-md-3">
                         <strong>Kernel Tree:</strong><br>
                         {% if staging_run.kernel_tree %}
-                            <span class="badge bg-secondary">{{ staging_run.kernel_tree }}</span>
+                            {% if staging_run.kernel_tree == "none" %}
+                                <span class="badge bg-warning text-dark">None (Skipped)</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ staging_run.kernel_tree }}</span>
+                            {% endif %}
                         {% else %}
                             <span class="text-muted">Auto</span>
                         {% endif %}
