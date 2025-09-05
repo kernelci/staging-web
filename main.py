@@ -3,6 +3,7 @@
 import os
 import json
 import asyncio
+from datetime import datetime
 from typing import List
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException, status, Form, BackgroundTasks
@@ -563,45 +564,67 @@ async def update_settings(
         "success": "Settings updated successfully"
     })
 
-@app.post("/staging/trigger")
-async def trigger_staging(
+
+@app.post("/api/staging/trigger")
+async def trigger_staging_api(
     request: Request,
-    kernel_tree: str = Form("auto"),
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    real_ip = get_real_ip(request)
-    
-    # Redirect to login if not authenticated
+    """JSON API endpoint to trigger staging run"""
+    # Return 401 if not authenticated
     if not current_user:
-        return RedirectResponse(url="/login", status_code=302)
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
     if current_user.role not in [UserRole.ADMIN, UserRole.MAINTAINER]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
     
-    # Check if there's already a running staging cycle (first check)
+    # Parse JSON body
+    try:
+        body = await request.json()
+        kernel_tree = body.get('kernel_tree')
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON body"
+        )
+    
+    real_ip = get_real_ip(request)
+    print(f"User '{current_user.username}' triggered staging run (kernel_tree='{kernel_tree}') from IP {real_ip}")
+    
+    # Check if there's already a running staging cycle
     running_staging = validate_single_running_staging(db)
     if running_staging:
-        # Return to the running staging detail page with an error message
-        return RedirectResponse(url=f"/staging/{running_staging.id}?error=already_running", status_code=302)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Staging run #{running_staging.id} is already running"
+        )
+    
+    # Validate and process kernel_tree selection
+    if not kernel_tree or kernel_tree.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Kernel tree selection is required"
+        )
+    
+    # Handle special keywords
+    if kernel_tree == "auto":
+        db_kernel_tree = "auto"
+    elif kernel_tree == "none":
+        db_kernel_tree = "none"
+    elif kernel_tree in ["next", "mainline", "stable"]:
+        db_kernel_tree = kernel_tree
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid kernel tree selection: {kernel_tree}"
+        )
     
     try:
-        print(f"User '{current_user.username}' triggered staging run (kernel_tree='{kernel_tree}') from IP {real_ip}")
-        print(f"DEBUG: Received kernel_tree value: '{kernel_tree}' (type: {type(kernel_tree)})")
-        
         # Create new staging run record
-        # Determine kernel_tree value to store
-        if kernel_tree == "none":
-            db_kernel_tree = "none"
-        elif kernel_tree == "auto":
-            db_kernel_tree = None  # Auto rotation
-        else:
-            db_kernel_tree = kernel_tree  # Specific tree (next, mainline, stable)
-        
-        print(f"DEBUG: Storing kernel_tree in database as: '{db_kernel_tree}'")
-        
         staging_run = StagingRun(
             user_id=current_user.id,
             status=StagingRunStatus.RUNNING,
@@ -618,28 +641,186 @@ async def trigger_staging(
             # Find the surviving staging run
             surviving_staging = validate_single_running_staging(db)
             if surviving_staging:
-                return RedirectResponse(url=f"/staging/{surviving_staging.id}?error=already_running", status_code=302)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Staging run #{surviving_staging.id} is already running"
+                )
             else:
-                return RedirectResponse(url="/?error=concurrency_conflict", status_code=302)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Concurrency conflict occurred"
+                )
         
         # Safe to commit - we're the only running staging
         db.commit()
         db.refresh(staging_run)
         
+        # Send Discord notification
+        if discord_webhook:
+            try:
+                await discord_webhook.send_staging_start(current_user.username, staging_run.id)
+            except Exception as e:
+                print(f"Failed to send Discord notification: {e}")
+        
+        return {
+            "success": True,
+            "staging_run_id": staging_run.id,
+            "message": f"Staging run #{staging_run.id} started successfully"
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         # Database error - rollback and show error
         db.rollback()
         print(f"Error creating staging run: {e}")
-        return RedirectResponse(url="/?error=database_error", status_code=302)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create staging run"
+        )
+
+@app.post("/staging/{run_id}/cancel")
+async def cancel_staging_run(
+    run_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """Cancel a running staging run (owner or admin/maintainer only)"""
+    # Redirect to login if not authenticated
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
     
-    # Send Discord notification
-    if discord_webhook:
-        try:
-            await discord_webhook.send_staging_start(current_user.username, staging_run.id)
-        except Exception as e:
-            print(f"Failed to send Discord notification: {e}")
+    # Get the staging run
+    staging_run = db.query(StagingRun).filter(StagingRun.id == run_id).first()
+    if not staging_run:
+        raise HTTPException(status_code=404, detail="Staging run not found")
     
-    return RedirectResponse(url=f"/staging/{staging_run.id}", status_code=302)
+    # Check permissions - only owner, admin, or maintainer can cancel
+    if (current_user.id != staging_run.user_id and 
+        current_user.role not in [UserRole.ADMIN, UserRole.MAINTAINER]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner, admin, or maintainer can cancel this staging run"
+        )
+    
+    # Can only cancel running staging runs
+    if staging_run.status != StagingRunStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel staging run with status: {staging_run.status.value}"
+        )
+    
+    real_ip = get_real_ip(request)
+    print(f"User '{current_user.username}' cancelling staging run #{run_id} from IP {real_ip}")
+    
+    try:
+        # Cancel any running GitHub workflows
+        from github_integration import GitHubWorkflowManager
+        from settings import get_setting, GITHUB_TOKEN
+        
+        # Find GitHub workflow steps that might need cancellation
+        for step in staging_run.steps:
+            if (step.step_type == StagingStepType.GITHUB_WORKFLOW and 
+                step.status == StagingStepStatus.RUNNING and 
+                step.github_actions_id):
+                
+                # Try to cancel the GitHub workflow
+                github_token = get_setting(GITHUB_TOKEN)
+                if github_token:
+                    github_manager = GitHubWorkflowManager(github_token)
+                    cancelled = await github_manager.cancel_workflow_run(step.github_actions_id)
+                    if cancelled:
+                        print(f"Cancelled GitHub workflow {step.github_actions_id} for step {step.id}")
+                    else:
+                        print(f"Failed to cancel GitHub workflow {step.github_actions_id} for step {step.id}")
+                
+                # Mark the step as cancelled
+                step.status = StagingStepStatus.FAILED
+                step.end_time = datetime.utcnow()
+                step.info_message = f"Cancelled by {current_user.username}"
+        
+        # Mark all other running/pending steps as skipped
+        for step in staging_run.steps:
+            if step.status in [StagingStepStatus.RUNNING, StagingStepStatus.PENDING]:
+                step.status = StagingStepStatus.SKIPPED
+                if not step.end_time:
+                    step.end_time = datetime.utcnow()
+                step.info_message = f"Cancelled by {current_user.username}"
+        
+        # Mark the staging run as cancelled
+        staging_run.status = StagingRunStatus.CANCELLED
+        staging_run.end_time = datetime.utcnow()
+        staging_run.error_message = f"Cancelled by {current_user.username}"
+        staging_run.current_step = None
+        
+        db.commit()
+        
+        # Send Discord notification if available
+        if discord_webhook:
+            try:
+                duration = None
+                if staging_run.start_time and staging_run.end_time:
+                    duration_seconds = (staging_run.end_time - staging_run.start_time).total_seconds()
+                    duration = f"{int(duration_seconds // 60)} minutes"
+                
+                await discord_webhook.send_staging_complete(
+                    current_user.username,
+                    staging_run.id,
+                    "cancelled",
+                    duration
+                )
+            except Exception as e:
+                print(f"Failed to send Discord notification: {e}")
+        
+        print(f"Staging run #{run_id} cancelled successfully")
+        return RedirectResponse(url=f"/staging/{run_id}", status_code=302)
+        
+    except Exception as e:
+        db.rollback()
+        print(f"Error cancelling staging run {run_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cancel staging run"
+        )
+
+@app.get("/api/changelog")
+async def get_changelog(current_user: User = Depends(get_current_user_optional)):
+    """Get changelog content from CHANGELOG.md file"""
+    # Return 401 if not authenticated
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    import os
+    from pathlib import Path
+    
+    # Look for CHANGELOG.md in the current directory
+    changelog_path = Path("CHANGELOG.md")
+    
+    if not changelog_path.exists():
+        return {
+            "success": False,
+            "content": "# Changelog\n\nNo changelog available at this time.",
+            "message": "CHANGELOG.md file not found"
+        }
+    
+    try:
+        with open(changelog_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return {
+            "success": True,
+            "content": content,
+            "message": "Changelog loaded successfully"
+        }
+        
+    except Exception as e:
+        print(f"Error reading changelog: {e}")
+        return {
+            "success": False,
+            "content": "# Changelog\n\nError loading changelog.",
+            "message": f"Error reading changelog: {str(e)}"
+        }
 
 @app.get("/api/staging/status")
 async def get_staging_status(current_user: User = Depends(get_current_user_optional), db: Session = Depends(get_db)):

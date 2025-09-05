@@ -94,7 +94,8 @@ class StagingRunStep(Base):
     
     # Progress and error tracking
     details = Column(Text, nullable=True)  # JSON or text details about step progress
-    error_message = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)  # For actual errors
+    info_message = Column(Text, nullable=True)   # For warnings, skip reasons, and info
     
     # Order of execution
     sequence_order = Column(Integer, nullable=False, default=0)

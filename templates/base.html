@@ -15,6 +15,9 @@
                 <i class="fas fa-server me-2"></i>KernelCI Staging Control
             </a>
             <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="#" onclick="showChangelog()" title="Changelog">
+                    <i class="fas fa-clipboard-list me-1"></i>Changelog
+                </a>
                 <div class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
                         <i class="fas fa-user me-1"></i>{{ user.username }} ({{ user.role.value }})
@@ -36,6 +39,33 @@
 
     <div class="container mt-4">
         {% block content %}{% endblock %}
+    </div>
+
+    <!-- Changelog Modal -->
+    <div class="modal fade" id="changelogModal" tabindex="-1" aria-labelledby="changelogModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="changelogModalLabel">
+                        <i class="fas fa-clipboard-list me-2"></i>Changelog
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="changelogContent" class="markdown-content">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading changelog...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- AJAX Loading Overlay -->
@@ -193,6 +223,66 @@
         @keyframes fadeOut {
             from { opacity: 1; }
             to { opacity: 0; }
+        }
+
+        /* Markdown Content Styling */
+        .markdown-content {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+        }
+
+        .markdown-content h1, .markdown-content h2, .markdown-content h3, 
+        .markdown-content h4, .markdown-content h5, .markdown-content h6 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .markdown-content h1 { font-size: 1.75rem; border-bottom: 1px solid #e1e4e8; padding-bottom: 0.3rem; }
+        .markdown-content h2 { font-size: 1.5rem; border-bottom: 1px solid #e1e4e8; padding-bottom: 0.3rem; }
+        .markdown-content h3 { font-size: 1.25rem; }
+        .markdown-content h4 { font-size: 1.1rem; }
+
+        .markdown-content ul, .markdown-content ol { padding-left: 1.5rem; }
+        .markdown-content li { margin-bottom: 0.25rem; }
+
+        .markdown-content code {
+            background-color: #f6f8fa;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.9rem;
+        }
+
+        .markdown-content pre {
+            background-color: #f6f8fa;
+            padding: 1rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+        }
+
+        .markdown-content blockquote {
+            padding: 0 1rem;
+            color: #6a737d;
+            border-left: 0.25rem solid #dfe2e5;
+            margin: 1rem 0;
+        }
+
+        .markdown-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .markdown-content th, .markdown-content td {
+            padding: 0.5rem;
+            border: 1px solid #dfe2e5;
+            text-align: left;
+        }
+
+        .markdown-content th {
+            background-color: #f6f8fa;
+            font-weight: 600;
         }
     </style>
 
@@ -465,6 +555,97 @@
     document.addEventListener('DOMContentLoaded', function() {
         AjaxLoader.init();
     });
+    </script>
+    
+    <!-- Changelog Modal Script -->
+    <script>
+    // Global function for showing changelog
+    window.showChangelog = async function() {
+        const modal = new bootstrap.Modal(document.getElementById('changelogModal'));
+        const contentDiv = document.getElementById('changelogContent');
+        
+        // Show modal immediately with loading state
+        modal.show();
+        
+        // Reset content to loading state
+        contentDiv.innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading changelog...</p>
+            </div>
+        `;
+        
+        try {
+            const response = await fetch('/api/changelog', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                // Convert markdown to HTML (simple conversion)
+                const htmlContent = convertMarkdownToHtml(data.content);
+                contentDiv.innerHTML = htmlContent;
+            } else {
+                // Show error message
+                contentDiv.innerHTML = `
+                    <div class="alert alert-warning" role="alert">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Unable to load changelog</strong><br>
+                        ${data.message || 'Unknown error occurred'}
+                    </div>
+                `;
+            }
+            
+        } catch (error) {
+            console.error('Error fetching changelog:', error);
+            contentDiv.innerHTML = `
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-times-circle me-2"></i>
+                    <strong>Network Error</strong><br>
+                    Failed to fetch changelog. Please check your connection and try again.
+                </div>
+            `;
+        }
+    }
+    
+    // Global function for markdown conversion (simplified)
+    window.convertMarkdownToHtml = function(markdown) {
+        // Simple markdown to HTML conversion
+        let html = markdown;
+        
+        // Convert headers
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        
+        // Convert bold and italic
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        
+        // Convert inline code
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        
+        // Convert links
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        
+        // Convert line breaks to paragraphs (simple)
+        html = html.split('\n\n').map(para => para.trim() ? `<p>${para.replace(/\n/g, '<br>')}</p>` : '').join('');
+        
+        // Convert bullet points after paragraph conversion
+        html = html.replace(/<p>- (.+?)<\/p>/g, '<li>$1</li>');
+        html = html.replace(/(<li>.+?<\/li>)/gs, '<ul>$1</ul>');
+        
+        return html;
+    }
+    
+    // Debug log to confirm functions are loaded
+    console.log('Changelog functions loaded:', typeof window.showChangelog, typeof window.convertMarkdownToHtml);
     </script>
     
     {% block scripts %}{% endblock %}
