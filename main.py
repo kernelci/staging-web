@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 import uvicorn
 
 from config import APP_TITLE, HOST, PORT, ORCHESTRATOR_INTERVAL_SECONDS, MAX_RECENT_RUNS, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -23,6 +24,11 @@ from auth import get_password_hash, verify_password, create_access_token, get_cu
 from settings import get_setting, set_setting, DISCORD_WEBHOOK_URL, GITHUB_TOKEN, SKIP_SELF_UPDATE
 from discord_webhook import configure_discord_webhook, discord_webhook
 from db_constraints import validate_single_running_staging, enforce_single_running_staging
+
+# Pydantic models for API requests
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 # Initialize database first
 init_db()
@@ -336,41 +342,42 @@ async def profile_page(request: Request, current_user: User = Depends(get_curren
         "user": current_user
     })
 
-@app.post("/profile")
-async def update_profile(
-    request: Request,
-    current_password: str = Form(...),
-    new_password: str = Form(...),
+
+@app.post("/api/profile/change-password")
+async def change_password_api(
+    request: PasswordChangeRequest,
     current_user: User = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    # Redirect to login if not authenticated
+    # Check authentication
     if not current_user:
-        return RedirectResponse(url="/login", status_code=302)
-    if not verify_password(current_password, current_user.password_hash):
-        return templates.TemplateResponse("profile.html", {
-            "request": request,
-            "user": current_user,
-            "error": "Current password is incorrect"
-        })
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required"
+        )
+
+    # Verify current password
+    if not verify_password(request.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
     
     # Get the user from the current database session
     db_user = db.query(User).filter(User.id == current_user.id).first()
     if not db_user:
-        return templates.TemplateResponse("profile.html", {
-            "request": request,
-            "user": current_user,
-            "error": "User not found in database"
-        })
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found in database"
+        )
     
     # Update the password on the session-bound user object
-    db_user.password_hash = get_password_hash(new_password)
+    db_user.password_hash = get_password_hash(request.new_password)
     db.commit()
     
-    return templates.TemplateResponse("profile.html", {
-        "request": request,
-        "user": current_user,
-        "success": "Password updated successfully"
+    return JSONResponse({
+        "success": True,
+        "message": "Password updated successfully"
     })
 
 @app.get("/users", response_class=HTMLResponse)
