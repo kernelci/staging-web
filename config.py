@@ -81,6 +81,6 @@ DEFAULT_ADMIN_EMAIL = config["default_admin"]["email"]
 # Settings Keys - hardcoded database keys for runtime settings
 SETTINGS_KEYS = {
     "GITHUB_TOKEN": "github_token",
-    "DISCORD_WEBHOOK_URL": "discord_webhook_url", 
+    "DISCORD_WEBHOOK_URL": "discord_webhook_url",
     "SKIP_SELF_UPDATE": "skip_self_update",
 }

@@ -16,6 +16,7 @@ from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -23,11 +24,14 @@ def get_db():
     finally:
         db.close()
 
+
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
+
 def get_password_hash(password):
     return pwd_context.hash(password)
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -39,19 +43,26 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def get_current_user(access_token: Optional[str] = Cookie(None), db: Session = Depends(get_db)):
+
+def get_current_user(
+    access_token: Optional[str] = Cookie(None), db: Session = Depends(get_db)
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     if not access_token:
         raise credentials_exception
-    
+
     # Remove "Bearer " prefix if present
-    token = access_token.replace("Bearer ", "") if access_token.startswith("Bearer ") else access_token
-    
+    token = (
+        access_token.replace("Bearer ", "")
+        if access_token.startswith("Bearer ")
+        else access_token
+    )
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -59,20 +70,27 @@ def get_current_user(access_token: Optional[str] = Cookie(None), db: Session = D
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
+
     user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise credentials_exception
     return user
 
-def get_current_user_optional(access_token: Optional[str] = Cookie(None), db: Session = Depends(get_db)):
+
+def get_current_user_optional(
+    access_token: Optional[str] = Cookie(None), db: Session = Depends(get_db)
+):
     """Get current user but return None if not authenticated (no exception)"""
     if not access_token:
         return None
-    
+
     # Remove "Bearer " prefix if present
-    token = access_token.replace("Bearer ", "") if access_token.startswith("Bearer ") else access_token
-    
+    token = (
+        access_token.replace("Bearer ", "")
+        if access_token.startswith("Bearer ")
+        else access_token
+    )
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -80,6 +98,6 @@ def get_current_user_optional(access_token: Optional[str] = Cookie(None), db: Se
             return None
     except JWTError:
         return None
-    
+
     user = db.query(User).filter(User.username == username).first()
     return user
