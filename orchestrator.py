@@ -137,11 +137,15 @@ class StagingOrchestrator:
 
         steps.extend(
             [
-                {"type": StagingStepType.KERNEL_TREE_UPDATE, "order": order_counter},
                 {
                     "type": StagingStepType.API_PIPELINE_UPDATE,
+                    "order": order_counter,
+                },
+                {
+                    "type": StagingStepType.KERNEL_TREE_UPDATE,
                     "order": order_counter + 1,
                 },
+                {"type": StagingStepType.TRIGGER_RESTART, "order": order_counter + 2},
             ]
         )
 
@@ -221,6 +225,8 @@ class StagingOrchestrator:
             await self.process_kernel_tree_step(staging_run, step, db)
         elif step.step_type == StagingStepType.API_PIPELINE_UPDATE:
             await self.process_api_pipeline_step(staging_run, step, db)
+        elif step.step_type == StagingStepType.TRIGGER_RESTART:
+            await self.process_trigger_restart_step(staging_run, step, db)
 
     async def process_github_workflow_step(
         self, staging_run: StagingRun, step: StagingRunStep, db: Session
@@ -441,6 +447,36 @@ class StagingOrchestrator:
                 step.end_time = datetime.utcnow()
                 db.commit()
 
+    async def process_trigger_restart_step(
+        self, staging_run: StagingRun, step: StagingRunStep, db: Session
+    ):
+        """Process trigger restart step - restart the trigger service in pipeline"""
+        if step.status == StagingStepStatus.PENDING:
+            step.status = StagingStepStatus.RUNNING
+            step.start_time = datetime.utcnow()
+            staging_run.current_step = "trigger_restart"
+            db.commit()
+
+            try:
+                # Restart the trigger service in the pipeline
+                result = await self.deployment_manager.restart_trigger_service()
+
+                step.end_time = datetime.utcnow()
+                if result["success"]:
+                    step.status = StagingStepStatus.COMPLETED
+                    step.details = json.dumps(result)
+                else:
+                    step.status = StagingStepStatus.FAILED
+                    step.error_message = result.get("error", "Unknown error")
+
+                db.commit()
+
+            except Exception as e:
+                step.status = StagingStepStatus.FAILED
+                step.error_message = str(e)
+                step.end_time = datetime.utcnow()
+                db.commit()
+
     async def complete_staging_run(
         self, staging_run: StagingRun, db: Session, success: bool
     ):
@@ -508,6 +544,8 @@ class StagingOrchestrator:
                         timeout_minutes = 15  # Git operations
                     elif step.step_type == StagingStepType.SELF_UPDATE:
                         timeout_minutes = 10  # Quick git pull
+                    elif step.step_type == StagingStepType.TRIGGER_RESTART:
+                        timeout_minutes = 5  # Quick docker restart
 
                     if running_duration.total_seconds() > (timeout_minutes * 60):
                         print(
@@ -576,6 +614,7 @@ class StagingOrchestrator:
                             StagingStepType.API_PIPELINE_UPDATE,
                             StagingStepType.KERNEL_TREE_UPDATE,
                             StagingStepType.SELF_UPDATE,
+                            StagingStepType.TRIGGER_RESTART,
                         ]:
                             print(
                                 f"Recovering stuck local step: {step.step_type.value}"

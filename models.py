@@ -32,6 +32,7 @@ class StagingStepType(str, enum.Enum):
     KERNEL_TREE_UPDATE = "kernel_tree_update"
     API_PIPELINE_UPDATE = "api_pipeline_update"
     MONITORING_SETUP = "monitoring_setup"
+    TRIGGER_RESTART = "trigger_restart"
 
 
 class StagingRunStatus(str, enum.Enum):
