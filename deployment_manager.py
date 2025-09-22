@@ -440,3 +440,62 @@ class DeploymentManager:
             )
 
         return {"success": True, "results": results}
+
+    async def restart_trigger_service(self) -> Dict[str, Any]:
+        """
+        Restart the trigger service in the pipeline
+        Returns: {"success": bool, "error": str, "details": dict}
+        """
+        result = {
+            "success": False,
+            "error": None,
+            "details": {"start_time": datetime.utcnow().isoformat()},
+        }
+
+        try:
+            # Set environment variable for pipeline settings
+            env = os.environ.copy()
+            env["SETTINGS"] = PIPELINE_SETTINGS_PATH
+
+            # Restart the trigger service using docker-compose
+            cmd = ["docker-compose"]
+
+            # Add compose files if configured
+            if self.compose_files:
+                cmd.extend(self.compose_files)
+
+            # Add restart command for trigger service
+            cmd.extend(["restart", "trigger"])
+
+            print(f"Restarting trigger service with command: {' '.join(cmd)}")
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                cwd=self.pipeline_path,
+            )
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                result["success"] = True
+                result["details"]["stdout"] = stdout.decode("utf-8", errors="ignore")
+                result["details"]["stderr"] = stderr.decode("utf-8", errors="ignore")
+                result["details"]["end_time"] = datetime.utcnow().isoformat()
+                print("Successfully restarted trigger service")
+            else:
+                result["error"] = (
+                    f"Failed to restart trigger service: {stderr.decode('utf-8', errors='ignore')}"
+                )
+                result["details"]["stdout"] = stdout.decode("utf-8", errors="ignore")
+                result["details"]["stderr"] = stderr.decode("utf-8", errors="ignore")
+                print(f"Failed to restart trigger service: {result['error']}")
+
+        except Exception as e:
+            result["error"] = f"Exception restarting trigger service: {str(e)}"
+            result["details"]["exception"] = str(e)
+            print(f"Exception restarting trigger service: {e}")
+
+        return result

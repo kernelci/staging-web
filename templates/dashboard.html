@@ -177,7 +177,7 @@
                         </select>
                     </div>
                     
-                    <button type="button" class="btn btn-primary w-100" id="stagingTriggerBtn" onclick="triggerStagingRun()">
+                    <button type="button" class="btn btn-primary w-100" id="stagingTriggerBtn" onclick="openStagingModal()">
                         <i class="fas fa-rocket me-2"></i>Trigger Staging Run
                     </button>
                 </div>
@@ -287,6 +287,34 @@
     </div>
 </div>
 
+<!-- Staging Run Modal -->
+<div class="modal fade" id="stagingRunModal" tabindex="-1" aria-labelledby="stagingRunModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="stagingRunModalLabel">
+                    <i class="fas fa-rocket me-2"></i>Starting Staging Run
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="stagingModalContent">
+                    <!-- Content will be dynamically updated -->
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Checking preconditions...</span>
+                        </div>
+                        <p class="mt-3 mb-0">Checking preconditions...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" id="stagingModalFooter" style="display: none;">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% if staging_runs and staging_runs[0].status.value == 'running' %}
 <script>
 // Auto-refresh for running staging runs
@@ -300,27 +328,136 @@ setTimeout(function() {
 
 {% block scripts %}
 <script>
-async function triggerStagingRun() {
+let stagingModal = null;
+
+async function openStagingModal() {
+    // Get modal instance
+    const modalElement = document.getElementById('stagingRunModal');
+    if (!stagingModal) {
+        stagingModal = new bootstrap.Modal(modalElement);
+    }
+
+    // Reset modal content
+    document.getElementById('stagingModalContent').innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Checking preconditions...</span>
+            </div>
+            <p class="mt-3 mb-0">Checking preconditions...</p>
+            <small class="text-muted">Verifying GitHub workflow status...</small>
+        </div>
+    `;
+
+    // Hide footer initially
+    document.getElementById('stagingModalFooter').style.display = 'none';
+
+    // Show modal
+    stagingModal.show();
+
+    // Check preconditions
+    try {
+        const response = await fetch('/api/staging/check-workflow', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            if (data.can_trigger) {
+                // All checks passed - proceed to trigger
+                await proceedWithStagingRun();
+            } else {
+                // Show error in modal
+                showModalError(data.reason, data.running_workflows);
+            }
+        } else if (response.status === 401) {
+            // Authentication required
+            showModalError('Authentication required. Please refresh the page and try again.');
+        } else if (response.status === 403) {
+            // Permission denied
+            showModalError('You do not have permission to trigger staging runs.');
+        } else {
+            // Other error
+            showModalError(`Error: ${data.detail || 'Failed to check preconditions'}`);
+        }
+    } catch (error) {
+        console.error('Error checking preconditions:', error);
+        showModalError('Network error: Failed to check preconditions. Please try again.');
+    }
+}
+
+function showModalError(message, runningWorkflows = []) {
+    const modalContent = document.getElementById('stagingModalContent');
+    const modalFooter = document.getElementById('stagingModalFooter');
+
+    let errorHtml = `
+        <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>Cannot Start Staging Run</strong>
+            <hr>
+            <p class="mb-0">${message}</p>
+        </div>
+    `;
+
+    // Show running workflows if any
+    if (runningWorkflows && runningWorkflows.length > 0) {
+        errorHtml += `
+            <div class="mt-3">
+                <h6>Active GitHub Workflows:</h6>
+                <ul class="list-group">
+        `;
+
+        for (const workflow of runningWorkflows) {
+            const createdAt = new Date(workflow.created_at).toLocaleString();
+            errorHtml += `
+                <li class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Run #${workflow.run_number}</strong><br>
+                            <small class="text-muted">Started: ${createdAt}</small>
+                        </div>
+                        <span class="badge bg-primary">
+                            <i class="fas fa-spinner fa-spin me-1"></i>${workflow.status}
+                        </span>
+                    </div>
+                    ${workflow.html_url ? `<a href="${workflow.html_url}" target="_blank" class="btn btn-sm btn-outline-primary mt-2">
+                        <i class="fas fa-external-link-alt me-1"></i>View on GitHub
+                    </a>` : ''}
+                </li>
+            `;
+        }
+
+        errorHtml += `
+                </ul>
+            </div>
+        `;
+    }
+
+    modalContent.innerHTML = errorHtml;
+
+    // Show footer with Close button
+    modalFooter.style.display = 'block';
+}
+
+async function proceedWithStagingRun() {
+    const modalContent = document.getElementById('stagingModalContent');
     const kernelTreeSelect = document.getElementById('kernel_tree');
-    const triggerBtn = document.getElementById('stagingTriggerBtn');
-    
-    if (!kernelTreeSelect || !triggerBtn) {
-        console.error('Form elements not found');
-        return;
-    }
-    
     const kernelTree = kernelTreeSelect.value;
-    console.log('DEBUG: Selected kernel tree:', kernelTree);
-    
-    // Disable button and show loading
-    triggerBtn.disabled = true;
-    triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Starting...';
-    
-    // Show loading animation if available
-    if (typeof window.AjaxLoader !== 'undefined') {
-        AjaxLoader.show('Starting Staging Run...');
-    }
-    
+
+    // Update modal to show progress
+    modalContent.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border text-success" role="status">
+                <span class="visually-hidden">Starting staging run...</span>
+            </div>
+            <p class="mt-3 mb-0">Starting staging run...</p>
+            <small class="text-muted">Kernel tree: ${kernelTree}</small>
+        </div>
+    `;
+
     try {
         const response = await fetch('/api/staging/trigger', {
             method: 'POST',
@@ -331,37 +468,47 @@ async function triggerStagingRun() {
                 kernel_tree: kernelTree
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
-            // Success - redirect to staging run detail
-            window.location.href = `/staging/${data.staging_run_id}`;
+            // Success - show success message briefly then redirect
+            modalContent.innerHTML = `
+                <div class="text-center">
+                    <i class="fas fa-check-circle text-success" style="font-size: 3rem;"></i>
+                    <h5 class="mt-3">Staging Run Started!</h5>
+                    <p class="mb-0">Run #${data.staging_run_id} has been initiated successfully.</p>
+                    <p class="text-muted">Redirecting...</p>
+                </div>
+            `;
+
+            // Auto close modal and redirect after 1.5 seconds
+            setTimeout(() => {
+                stagingModal.hide();
+                window.location.href = `/staging/${data.staging_run_id}`;
+            }, 1500);
         } else {
             // Error - show message
-            alert(`Error: ${data.detail || 'Failed to start staging run'}`);
-            
-            // Reset button
-            triggerBtn.disabled = false;
-            triggerBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Trigger Staging Run';
+            showModalError(data.detail || 'Failed to start staging run');
         }
     } catch (error) {
         console.error('Error triggering staging run:', error);
-        alert('Network error: Failed to start staging run');
-        
-        // Reset button
-        triggerBtn.disabled = false;
-        triggerBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Trigger Staging Run';
-    } finally {
-        // Hide loading animation
-        if (typeof window.AjaxLoader !== 'undefined') {
-            AjaxLoader.hide();
-        }
+        showModalError('Network error: Failed to start staging run. Please try again.');
     }
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Dashboard loaded - AJAX staging trigger ready');
+    console.log('Dashboard loaded - Modal staging trigger ready');
+
+    // Clean up modal when hidden
+    const modalElement = document.getElementById('stagingRunModal');
+    modalElement.addEventListener('hidden.bs.modal', function () {
+        // Reset button state if needed
+        const triggerBtn = document.getElementById('stagingTriggerBtn');
+        if (triggerBtn) {
+            triggerBtn.disabled = false;
+        }
+    });
 });
 </script>
 

@@ -2,7 +2,16 @@
 
 All notable changes to the KernelCI Staging Control application will be documented in this file.
 
-## [Unreleased]
+## [0.2.0]
+
+### Added
+
+- **Scheduler**: Added staging scheduler that will run staging at 0:00UTC 8:00UTC,16:00UTC
+  - Will be run using fastapi-crons
+  - Condition: If staging has run less than 1 hour ago - skip run
+  - Appears dashboard as user run, under "virtual" user "scheduler"
+
+## [0.1.0]
 
 ### Added
 - **Staging Run Cancellation**: Added ability to cancel running staging runs

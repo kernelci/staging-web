@@ -24,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import uvicorn
+from fastapi_crons import Crons
 
 from config import (
     APP_TITLE,
@@ -63,6 +64,7 @@ from db_constraints import (
     validate_single_running_staging,
     enforce_single_running_staging,
 )
+from scheduler import register_cron_jobs
 
 
 # Pydantic models for API requests
@@ -115,6 +117,8 @@ async def lifespan(app: FastAPI):
 
 # Create app with lifespan
 app = FastAPI(title=APP_TITLE, lifespan=lifespan)
+crons = Crons(app)
+register_cron_jobs(crons)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="templates"), name="static")
@@ -972,6 +976,64 @@ async def get_staging_status(
         "system_healthy": running_count <= 1,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.get("/api/staging/check-workflow")
+async def check_workflow_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Check if GitHub workflow is already running"""
+    # Only allow admin/maintainer to check workflow status
+    if current_user.role not in [UserRole.ADMIN, UserRole.MAINTAINER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
+
+    # Check if GitHub token is configured
+    github_token = get_setting(GITHUB_TOKEN)
+    if not github_token:
+        return {
+            "can_trigger": False,
+            "reason": "GitHub token not configured",
+            "running_workflows": [],
+        }
+
+    try:
+        from github_integration import GitHubWorkflowManager
+
+        github_manager = GitHubWorkflowManager(github_token)
+        running_workflows = await github_manager.get_running_workflows()
+
+        if running_workflows:
+            return {
+                "can_trigger": False,
+                "reason": f"GitHub workflow is already running ({len(running_workflows)} active)",
+                "running_workflows": running_workflows,
+            }
+
+        # Also check if there's a running staging in database
+        running_staging = validate_single_running_staging(db)
+        if running_staging:
+            return {
+                "can_trigger": False,
+                "reason": f"Staging run #{running_staging.id} is already running",
+                "running_workflows": [],
+            }
+
+        return {
+            "can_trigger": True,
+            "reason": "Ready to trigger new staging run",
+            "running_workflows": [],
+        }
+
+    except Exception as e:
+        print(f"Error checking workflow status: {e}")
+        return {
+            "can_trigger": False,
+            "reason": f"Error checking workflow status: {str(e)}",
+            "running_workflows": [],
+        }
 
 
 if __name__ == "__main__":

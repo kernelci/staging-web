@@ -12,6 +12,7 @@ from config import (
     DEFAULT_ADMIN_EMAIL,
     SETTINGS_KEYS,
 )
+from scheduler_user import ensure_scheduler_user
 
 SQLALCHEMY_DATABASE_URL = DATABASE_URL
 
@@ -66,6 +67,13 @@ def run_migrations():
 
     print("Database migration check completed")
 
+    # Ensure scheduler user exists for legacy databases migrated without init_db
+    db = SessionLocal()
+    try:
+        ensure_scheduler_user(db)
+    finally:
+        db.close()
+
 
 def init_db():
     """Initialize database and create default admin user"""
@@ -93,6 +101,8 @@ def init_db():
             db.add(admin_user)
             db.commit()
             print("Default admin user created")
+
+        ensure_scheduler_user(db)
 
         # Create default settings
         for setting_name, setting_key in SETTINGS_KEYS.items():
