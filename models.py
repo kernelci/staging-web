@@ -2,7 +2,17 @@
 # Author: Denys Fedoryshchenko <denys.f@collabora.com>
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Text, JSON
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DateTime,
+    ForeignKey,
+    Enum,
+    Text,
+    JSON,
+    Boolean,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -78,6 +88,9 @@ class StagingRun(Base):
 
     # Kernel tree selection (next, mainline, stable)
     kernel_tree = Column(String, nullable=True)
+
+    # Skip compiler images option
+    skip_compiler_images = Column(Boolean, nullable=False, default=False)
 
     # Overall progress tracking
     current_step = Column(String, nullable=True)

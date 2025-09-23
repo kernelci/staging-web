@@ -700,6 +700,7 @@ async def trigger_staging_api(
     try:
         body = await request.json()
         kernel_tree = body.get("kernel_tree")
+        skip_compiler_images = body.get("skip_compiler_images", False)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body"
@@ -707,7 +708,7 @@ async def trigger_staging_api(
 
     real_ip = get_real_ip(request)
     print(
-        f"User '{current_user.username}' triggered staging run (kernel_tree='{kernel_tree}') from IP {real_ip}"
+        f"User '{current_user.username}' triggered staging run (kernel_tree='{kernel_tree}', skip_compiler_images={skip_compiler_images}) from IP {real_ip}"
     )
 
     # Check if there's already a running staging cycle
@@ -745,6 +746,7 @@ async def trigger_staging_api(
             status=StagingRunStatus.RUNNING,
             initiated_via="manual",
             kernel_tree=db_kernel_tree,
+            skip_compiler_images=skip_compiler_images,
         )
         db.add(staging_run)
         db.flush()  # Get the ID without committing

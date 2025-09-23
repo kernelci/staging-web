@@ -261,8 +261,11 @@ class StagingOrchestrator:
             staging_run.current_step = "github_workflow"
             db.commit()
 
-            # Trigger workflow
-            workflow_run_id = await self.github_manager.trigger_workflow()
+            # Trigger workflow with skip_compiler_images input
+            inputs = {
+                "SKIP_COMPILER_IMAGES": str(staging_run.skip_compiler_images).lower()
+            }
+            workflow_run_id = await self.github_manager.trigger_workflow(inputs=inputs)
             if workflow_run_id:
                 step.github_actions_id = workflow_run_id
                 step.details = json.dumps(

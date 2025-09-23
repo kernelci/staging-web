@@ -33,7 +33,13 @@ def run_migrations():
             "column": "info_message",
             "type": "TEXT",
             "description": "Column for informational messages (warnings, skip reasons, etc.)",
-        }
+        },
+        {
+            "table": "staging_runs",
+            "column": "skip_compiler_images",
+            "type": "BOOLEAN DEFAULT 0",
+            "description": "Option to skip building compiler images in the workflow",
+        },
         # Add future migrations here
     ]
 
