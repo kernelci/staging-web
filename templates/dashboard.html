@@ -176,7 +176,17 @@
                             <option value="stable">Linux Stable</option>
                         </select>
                     </div>
-                    
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="skip_compiler_images" name="skip_compiler_images">
+                            <label class="form-check-label" for="skip_compiler_images">
+                                Skip building compiler images
+                            </label>
+                            <div class="form-text">Check this to skip the compiler image building step in the workflow</div>
+                        </div>
+                    </div>
+
                     <button type="button" class="btn btn-primary w-100" id="stagingTriggerBtn" onclick="openStagingModal()">
                         <i class="fas fa-rocket me-2"></i>Trigger Staging Run
                     </button>
@@ -445,7 +455,9 @@ function showModalError(message, runningWorkflows = []) {
 async function proceedWithStagingRun() {
     const modalContent = document.getElementById('stagingModalContent');
     const kernelTreeSelect = document.getElementById('kernel_tree');
+    const skipCompilerImagesCheckbox = document.getElementById('skip_compiler_images');
     const kernelTree = kernelTreeSelect.value;
+    const skipCompilerImages = skipCompilerImagesCheckbox.checked;
 
     // Update modal to show progress
     modalContent.innerHTML = `
@@ -454,7 +466,7 @@ async function proceedWithStagingRun() {
                 <span class="visually-hidden">Starting staging run...</span>
             </div>
             <p class="mt-3 mb-0">Starting staging run...</p>
-            <small class="text-muted">Kernel tree: ${kernelTree}</small>
+            <small class="text-muted">Kernel tree: ${kernelTree}${skipCompilerImages ? ', Skip compiler images' : ''}</small>
         </div>
     `;
 
@@ -465,7 +477,8 @@ async function proceedWithStagingRun() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                kernel_tree: kernelTree
+                kernel_tree: kernelTree,
+                skip_compiler_images: skipCompilerImages
             })
         });
 

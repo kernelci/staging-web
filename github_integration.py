@@ -30,7 +30,11 @@ class GitHubWorkflowManager:
         }
 
     async def trigger_workflow(
-        self, repo: str = None, workflow: str = None, ref: str = GITHUB_REF
+        self,
+        repo: str = None,
+        workflow: str = None,
+        ref: str = GITHUB_REF,
+        inputs: dict = None,
     ) -> Optional[str]:
         """
         Trigger GitHub workflow and return the workflow run ID
@@ -55,7 +59,7 @@ class GitHubWorkflowManager:
         trigger_time = datetime.now(timezone.utc)
 
         url = f"{self.base_url}/repos/{repo}/actions/workflows/{workflow}/dispatches"
-        payload = {"ref": ref, "inputs": {}}
+        payload = {"ref": ref, "inputs": inputs or {}}
 
         try:
             async with httpx.AsyncClient() as client:
