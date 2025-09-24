@@ -10,6 +10,16 @@ All notable changes to the KernelCI Staging Control application will be document
   - Will be run using fastapi-crons
   - Condition: If staging has run less than 1 hour ago - skip run
   - Appears dashboard as user run, under "virtual" user "scheduler"
+  - Added modal verification for checking if GitHub workflows are already running
+- **Skip Compiler Images Option**: Added option to skip compiler images update
+  - New checkbox in staging trigger form to skip compiler images step
+  - Orchestrator skips compiler images step when option is selected
+  - Database migration to support new skip_compiler_images field
+  - Reduces staging cycle time in half, to approximately 10 minutes
+- **Trigger Restart Step**: Added final step to trigger restart of services
+  - Ensures kernel tree changes are picked up immediately after deployment
+  - Triggers restart of API and Pipeline services as the last orchestration step
+  - Added new deployment manager functionality for service restarts
 
 ## [0.1.0]
 
