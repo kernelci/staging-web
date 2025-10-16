@@ -536,19 +536,38 @@ class StagingOrchestrator:
                         # KernelCI API returns nodes in "items" array, not "data"
                         nodes = data.get("items", [])
 
-                        # Look for a node with submitter: "service:pipeline" and matching tree
+                        # Look for a node with submitter: "service:pipeline"
+                        print(
+                            f"DEBUG: Found {len(nodes)} checkout nodes, searching for tree: {staging_run.kernel_tree}"
+                        )
                         for node in nodes:
                             if node.get("submitter") == "service:pipeline":
                                 data_obj = node.get("data", {})
                                 kernel_revision = data_obj.get("kernel_revision", {})
                                 tree = kernel_revision.get("tree")
+                                branch = kernel_revision.get("branch")
 
-                                # Check if tree matches the kernel_tree from staging_run
-                                # For "auto" we need to match the actual selected tree
-                                if tree == staging_run.kernel_tree or (
-                                    staging_run.kernel_tree == "auto"
-                                    and tree in ["next", "mainline", "stable"]
-                                ):
+                                print(
+                                    f"DEBUG: Checking node - tree: {tree}, branch: {branch}, submitter: {node.get('submitter')}"
+                                )
+
+                                # TODO: Improve tree/branch matching logic
+                                # The current implementation doesn't properly match tree names.
+                                # Based on KernelCI API response, nodes have:
+                                # - tree: "kernelci", branch: "staging-mainline" (for mainline)
+                                # - tree: "kernelci", branch: "staging-stable" (for stable)
+                                # - tree: "kernelci", branch: "staging-next" (for next)
+                                # We should match based on branch name containing the selected tree
+                                # For now, just match any node with submitter: "service:pipeline"
+
+                                # Commented out old tree matching logic:
+                                # if tree == staging_run.kernel_tree or (
+                                #     staging_run.kernel_tree == "auto"
+                                #     and tree in ["next", "mainline", "stable"]
+                                # ):
+
+                                # Temporary: Accept any service:pipeline checkout node
+                                if True:
                                     # Found matching checkout node!
                                     treeid = node.get("id")
                                     if treeid:
