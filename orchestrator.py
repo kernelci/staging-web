@@ -533,7 +533,8 @@ class StagingOrchestrator:
                             return
 
                         data = await response.json()
-                        nodes = data.get("data", [])
+                        # KernelCI API returns nodes in "items" array, not "data"
+                        nodes = data.get("items", [])
 
                         # Look for a node with submitter: "service:pipeline" and matching tree
                         for node in nodes:
