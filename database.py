@@ -40,6 +40,12 @@ def run_migrations():
             "type": "BOOLEAN DEFAULT 0",
             "description": "Option to skip building compiler images in the workflow",
         },
+        {
+            "table": "staging_runs",
+            "column": "treeid",
+            "type": "TEXT",
+            "description": "Tree ID from KernelCI checkout node",
+        },
         # Add future migrations here
     ]
 

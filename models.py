@@ -43,6 +43,7 @@ class StagingStepType(str, enum.Enum):
     API_PIPELINE_UPDATE = "api_pipeline_update"
     MONITORING_SETUP = "monitoring_setup"
     TRIGGER_RESTART = "trigger_restart"
+    CHECKOUT_WAIT = "checkout_wait"
 
 
 class StagingRunStatus(str, enum.Enum):
@@ -88,6 +89,9 @@ class StagingRun(Base):
 
     # Kernel tree selection (next, mainline, stable)
     kernel_tree = Column(String, nullable=True)
+
+    # Tree ID from checkout node (KernelCI API)
+    treeid = Column(String, nullable=True)
 
     # Skip compiler images option
     skip_compiler_images = Column(Boolean, nullable=False, default=False)
