@@ -799,6 +799,171 @@ async def trigger_staging_api(
         )
 
 
+@app.get("/api/staging/{run_id}/nodes")
+async def get_staging_nodes(
+    run_id: int,
+    current_user: User = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """Get node results from KernelCI staging API grouped by kind and platform"""
+    # Return 401 if not authenticated
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    # Get the staging run
+    staging_run = db.query(StagingRun).filter(StagingRun.id == run_id).first()
+    if not staging_run:
+        raise HTTPException(status_code=404, detail="Staging run not found")
+
+    # Check if checkout wait step is completed
+    checkout_wait_step = None
+    for step in staging_run.steps:
+        if step.step_type == StagingStepType.CHECKOUT_WAIT:
+            checkout_wait_step = step
+            break
+
+    if not checkout_wait_step:
+        return {
+            "ready": False,
+            "error": "Checkout wait step not found",
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+
+    if checkout_wait_step.status != StagingStepStatus.COMPLETED:
+        return {
+            "ready": False,
+            "error": "Checkout wait step not completed yet",
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+
+    # Check if staging run status is completed
+    if staging_run.status != StagingRunStatus.COMPLETED:
+        return {
+            "ready": False,
+            "error": f"Staging run status is {staging_run.status.value}, not completed",
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+
+    # Calculate time since run completion
+    if not staging_run.end_time:
+        return {
+            "ready": False,
+            "error": "Staging run end time not set",
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+
+    time_elapsed = (datetime.utcnow() - staging_run.end_time).total_seconds()
+    wait_time = 300  # 5 minutes in seconds
+
+    if time_elapsed < wait_time:
+        time_remaining = int(wait_time - time_elapsed)
+        return {
+            "ready": False,
+            "wait_message": "Please wait 5 minutes...",
+            "time_remaining": time_remaining,
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+
+    # Check if treeid is available
+    if not staging_run.treeid:
+        return {
+            "ready": False,
+            "error": "Tree ID not available for this staging run",
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+
+    # Fetch nodes from KernelCI staging API
+    try:
+        import aiohttp
+        from urllib.parse import quote
+
+        api_url = f"https://staging.kernelci.org:9000/latest/nodes?treeid={quote(staging_run.treeid)}&limit=10000"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                api_url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status != 200:
+                    return {
+                        "ready": False,
+                        "error": f"API returned status {response.status}",
+                        "by_kind": {},
+                        "by_platform": {},
+                        "total_nodes": 0,
+                    }
+
+                data = await response.json()
+                nodes = data.get("items", [])
+
+                # Group by kind and result
+                by_kind = {}
+                for node in nodes:
+                    kind = node.get("kind", "unknown")
+                    result = node.get("result", "unknown")
+
+                    if kind not in by_kind:
+                        by_kind[kind] = {}
+
+                    if result not in by_kind[kind]:
+                        by_kind[kind][result] = 0
+
+                    by_kind[kind][result] += 1
+
+                # Group by platform and result (only for job nodes)
+                by_platform = {}
+                for node in nodes:
+                    kind = node.get("kind", "")
+                    if kind == "job":
+                        platform = node.get("data", {}).get("platform")
+                        if platform:
+                            result = node.get("result", "unknown")
+
+                            if platform not in by_platform:
+                                by_platform[platform] = {}
+
+                            if result not in by_platform[platform]:
+                                by_platform[platform][result] = 0
+
+                            by_platform[platform][result] += 1
+
+                return {
+                    "ready": True,
+                    "by_kind": by_kind,
+                    "by_platform": by_platform,
+                    "total_nodes": len(nodes),
+                }
+
+    except asyncio.TimeoutError:
+        return {
+            "ready": False,
+            "error": "Request to KernelCI API timed out",
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+    except Exception as e:
+        print(f"Error fetching nodes from KernelCI API: {e}")
+        return {
+            "ready": False,
+            "error": f"Failed to fetch nodes: {str(e)}",
+            "by_kind": {},
+            "by_platform": {},
+            "total_nodes": 0,
+        }
+
+
 @app.post("/staging/{run_id}/cancel")
 async def cancel_staging_run(
     run_id: int,
