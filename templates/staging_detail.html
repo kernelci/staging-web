@@ -200,10 +200,80 @@
                     </div>
                     {% endfor %}
                 </div>
+
+                <!-- Node Results Section -->
+                <div class="mt-4">
+                    <div class="card" id="nodeResultsCard">
+                        <div class="card-header" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#nodeResultsContent" aria-expanded="false">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-server me-2"></i>Node Results
+                                </h6>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-primary me-2" id="refreshNodesBtn" onclick="loadNodeResults()">
+                                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                                    </button>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="collapse" id="nodeResultsContent">
+                            <div class="card-body">
+                                <!-- Loading State -->
+                                <div id="nodeResultsLoading" class="text-center py-3" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin fa-2x text-primary mb-2"></i>
+                                    <p class="text-muted">Loading node results...</p>
+                                </div>
+
+                                <!-- Wait Message -->
+                                <div id="nodeResultsWait" style="display: none;">
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-clock me-2"></i>
+                                        <span id="waitMessage">Please wait 5 minutes...</span>
+                                        <div class="mt-2" id="countdownTimer"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Error Message -->
+                                <div id="nodeResultsError" class="alert alert-danger" style="display: none;">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    <span id="errorMessage"></span>
+                                </div>
+
+                                <!-- Results Content -->
+                                <div id="nodeResultsData" style="display: none;">
+                                    <div class="mb-3">
+                                        <strong>Total Nodes:</strong> <span id="totalNodes" class="badge bg-primary">0</span>
+                                    </div>
+
+                                    <!-- By Kind Results -->
+                                    <div class="mb-4">
+                                        <h6 class="mb-3">
+                                            <i class="fas fa-layer-group me-2"></i>Results by Kind
+                                        </h6>
+                                        <div id="byKindResults">
+                                            <p class="text-muted">No data available</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- By Platform Results -->
+                                    <div id="byPlatformSection">
+                                        <h6 class="mb-3">
+                                            <i class="fas fa-microchip me-2"></i>Results by Platform
+                                        </h6>
+                                        <div id="byPlatformResults">
+                                            <p class="text-muted">No data available</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-    
+
     <div class="col-md-4">
         <div class="card">
             <div class="card-header">
@@ -366,5 +436,217 @@ async function updateStepStatus() {
 setInterval(updateStepStatus, 15000);
 </script>
 {% endif %}
+
+<script>
+// Node Results functionality
+let countdownInterval = null;
+
+function showElement(id) {
+    document.getElementById(id).style.display = 'block';
+}
+
+function hideElement(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+function hideAllNodeResultsStates() {
+    hideElement('nodeResultsLoading');
+    hideElement('nodeResultsWait');
+    hideElement('nodeResultsError');
+    hideElement('nodeResultsData');
+}
+
+function showError(message) {
+    hideAllNodeResultsStates();
+    document.getElementById('errorMessage').textContent = message;
+    showElement('nodeResultsError');
+}
+
+function showWaitMessage(timeRemaining) {
+    hideAllNodeResultsStates();
+    showElement('nodeResultsWait');
+
+    // Clear any existing countdown
+    if (countdownInterval) {
+        clearInterval(countdownInterval);
+    }
+
+    // Start countdown
+    let remaining = timeRemaining;
+    updateCountdown(remaining);
+
+    countdownInterval = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+            clearInterval(countdownInterval);
+            loadNodeResults(); // Reload when timer reaches 0
+        } else {
+            updateCountdown(remaining);
+        }
+    }, 1000);
+}
+
+function updateCountdown(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    const timerElement = document.getElementById('countdownTimer');
+    if (timerElement) {
+        timerElement.innerHTML = `<strong>Time remaining:</strong> ${minutes}m ${secs}s`;
+    }
+}
+
+function formatResultsTable(data) {
+    if (!data || Object.keys(data).length === 0) {
+        return '<p class="text-muted">No data available</p>';
+    }
+
+    let html = '<table class="table table-sm table-striped">';
+    html += '<thead><tr><th>Name</th>';
+
+    // Get all unique result types
+    const resultTypes = new Set();
+    Object.values(data).forEach(results => {
+        Object.keys(results).forEach(result => resultTypes.add(result));
+    });
+
+    // Sort result types: pass first, then others alphabetically
+    const sortedResults = Array.from(resultTypes).sort((a, b) => {
+        if (a === 'pass') return -1;
+        if (b === 'pass') return 1;
+        if (a === 'fail') return -1;
+        if (b === 'fail') return 1;
+        return a.localeCompare(b);
+    });
+
+    sortedResults.forEach(result => {
+        html += `<th class="text-center">${result.charAt(0).toUpperCase() + result.slice(1)}</th>`;
+    });
+    html += '<th class="text-center">Total</th></tr></thead><tbody>';
+
+    // Sort entries alphabetically
+    const sortedEntries = Object.entries(data).sort((a, b) => a[0].localeCompare(b[0]));
+
+    sortedEntries.forEach(([name, results]) => {
+        html += `<tr><td><strong>${name}</strong></td>`;
+
+        let total = 0;
+        sortedResults.forEach(result => {
+            const count = results[result] || 0;
+            total += count;
+
+            // Color-code the badges
+            let badgeClass = 'bg-secondary';
+            if (result === 'pass') badgeClass = 'bg-success';
+            else if (result === 'fail') badgeClass = 'bg-danger';
+            else if (result === 'skip') badgeClass = 'bg-warning';
+
+            html += `<td class="text-center"><span class="badge ${badgeClass}">${count}</span></td>`;
+        });
+
+        html += `<td class="text-center"><span class="badge bg-primary">${total}</span></td>`;
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    return html;
+}
+
+function displayNodeResults(data) {
+    hideAllNodeResultsStates();
+
+    // Update total nodes
+    document.getElementById('totalNodes').textContent = data.total_nodes;
+
+    // Display by kind results
+    const byKindElement = document.getElementById('byKindResults');
+    byKindElement.innerHTML = formatResultsTable(data.by_kind);
+
+    // Display by platform results
+    const byPlatformElement = document.getElementById('byPlatformResults');
+    const byPlatformSection = document.getElementById('byPlatformSection');
+
+    if (Object.keys(data.by_platform).length > 0) {
+        byPlatformElement.innerHTML = formatResultsTable(data.by_platform);
+        byPlatformSection.style.display = 'block';
+    } else {
+        byPlatformSection.style.display = 'none';
+    }
+
+    showElement('nodeResultsData');
+}
+
+async function loadNodeResults() {
+    const runId = {{ staging_run.id }};
+    const refreshBtn = document.getElementById('refreshNodesBtn');
+
+    // Show loading state
+    hideAllNodeResultsStates();
+    showElement('nodeResultsLoading');
+
+    // Disable refresh button
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Loading...';
+    }
+
+    try {
+        const response = await fetch(`/api/staging/${runId}/nodes`);
+
+        if (!response.ok) {
+            if (response.status === 401) {
+                showError('Authentication required. Please log in again.');
+                return;
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.ready) {
+            displayNodeResults(data);
+        } else if (data.wait_message) {
+            showWaitMessage(data.time_remaining);
+        } else if (data.error) {
+            showError(data.error);
+        } else {
+            showError('Unknown response from server');
+        }
+
+    } catch (error) {
+        console.error('Error loading node results:', error);
+        showError(`Failed to load node results: ${error.message}`);
+    } finally {
+        // Re-enable refresh button
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refresh';
+        }
+    }
+}
+
+// Auto-load node results when the collapsible is shown
+document.getElementById('nodeResultsContent').addEventListener('show.bs.collapse', function() {
+    // Only load if not already loaded
+    const dataElement = document.getElementById('nodeResultsData');
+    const loadingElement = document.getElementById('nodeResultsLoading');
+    const waitElement = document.getElementById('nodeResultsWait');
+    const errorElement = document.getElementById('nodeResultsError');
+
+    // If nothing is visible, load the data
+    if (dataElement.style.display === 'none' &&
+        loadingElement.style.display === 'none' &&
+        waitElement.style.display === 'none' &&
+        errorElement.style.display === 'none') {
+        loadNodeResults();
+    }
+});
+
+// Clean up countdown interval when page is unloaded
+window.addEventListener('beforeunload', function() {
+    if (countdownInterval) {
+        clearInterval(countdownInterval);
+    }
+});
+</script>
 
 {% endblock %}

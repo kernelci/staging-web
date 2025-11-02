@@ -569,7 +569,7 @@ class StagingOrchestrator:
                                 # Temporary: Accept any service:pipeline checkout node
                                 if True:
                                     # Found matching checkout node!
-                                    treeid = node.get("id")
+                                    treeid = node.get("treeid")
                                     if treeid:
                                         # Store the treeid in StagingRun
                                         staging_run.treeid = treeid
