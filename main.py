@@ -662,6 +662,10 @@ async def update_settings(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
 
+    # Preserve existing GitHub token when the form submits an empty value.
+    if not github_token.strip():
+        github_token = get_setting(GITHUB_TOKEN, "")
+
     set_setting(DISCORD_WEBHOOK_URL, discord_webhook_url)
     set_setting(GITHUB_TOKEN, github_token)
     set_setting(SKIP_SELF_UPDATE, "true" if skip_self_update else "false")

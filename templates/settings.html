@@ -134,13 +134,19 @@ document.addEventListener('DOMContentLoaded', function() {
     if (settingsForm && typeof window.AjaxLoader !== 'undefined') {
         settingsForm.addEventListener('submit', function(e) {
             AjaxLoader.show('Saving settings...');
-            
-            // Disable form elements
-            const formElements = settingsForm.querySelectorAll('input, button');
-            formElements.forEach(element => {
-                element.disabled = true;
+
+            // Keep inputs submitted; make them read-only while the request goes out.
+            const inputs = settingsForm.querySelectorAll('input');
+            inputs.forEach(element => {
+                element.readOnly = true;
             });
-            
+
+            // Disable buttons to prevent double-submit.
+            const buttons = settingsForm.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.disabled = true;
+            });
+
             // Update button text
             if (settingsBtn) {
                 settingsBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Saving...';
