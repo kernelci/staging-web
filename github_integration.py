@@ -5,6 +5,9 @@
 
 import httpx
 import json
+import io
+import re
+import zipfile
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 import asyncio
@@ -267,6 +270,71 @@ class GitHubWorkflowManager:
         except Exception as e:
             print(f"Failed to get workflow run status: {e}")
             return {"status": "error", "conclusion": "failure", "error": str(e)}
+
+    async def get_workflow_run_logs_zip(
+        self, run_id: str, repo: str = GITHUB_REPO
+    ) -> Optional[bytes]:
+        """
+        Download the workflow run logs as a zip archive.
+        """
+        url = f"{self.base_url}/repos/{repo}/actions/runs/{run_id}/logs"
+
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                return response.content
+        except Exception as e:
+            print(f"Failed to download workflow run logs: {e}")
+            return None
+
+    def parse_pr_status_records(self, log_zip_bytes: bytes) -> List[Dict[str, Any]]:
+        """
+        Extract PR_STATUS JSON records from a workflow log zip archive.
+        """
+        if not log_zip_bytes:
+            return []
+
+        records = []
+        pattern = re.compile(r"PR_STATUS\s+(\{.*?\})")
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(log_zip_bytes)) as zip_file:
+                for info in zip_file.infolist():
+                    if info.is_dir():
+                        continue
+                    with zip_file.open(info) as log_file:
+                        for raw_line in log_file:
+                            line = raw_line.decode("utf-8", errors="ignore")
+                            for match in pattern.finditer(line):
+                                try:
+                                    records.append(json.loads(match.group(1)))
+                                except json.JSONDecodeError:
+                                    continue
+        except Exception as e:
+            print(f"Failed to parse workflow run logs: {e}")
+
+        return records
+
+    async def get_applied_prs_from_logs(
+        self, run_id: str, repo: str = GITHUB_REPO
+    ) -> List[Dict[str, Any]]:
+        """
+        Return PR_STATUS records with state=applied from workflow run logs.
+        """
+        log_zip_bytes = await self.get_workflow_run_logs_zip(run_id, repo)
+        records = self.parse_pr_status_records(log_zip_bytes)
+
+        applied = {}
+        for record in records:
+            if record.get("state") != "applied":
+                continue
+            pr = record.get("pr")
+            if pr is None:
+                continue
+            applied[int(pr)] = record
+
+        return [applied[pr] for pr in sorted(applied.keys())]
 
     async def wait_for_workflow_completion(
         self,

@@ -968,6 +968,63 @@ async def get_staging_nodes(
         }
 
 
+@app.get("/api/staging/{run_id}/tested-prs")
+async def get_staging_tested_prs(
+    run_id: int,
+    current_user: User = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """Extract applied PRs from GitHub Actions logs for a staging run"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    staging_run = db.query(StagingRun).filter(StagingRun.id == run_id).first()
+    if not staging_run:
+        raise HTTPException(status_code=404, detail="Staging run not found")
+
+    github_actions_id = None
+    for step in staging_run.steps:
+        if step.step_type == StagingStepType.GITHUB_WORKFLOW and step.github_actions_id:
+            github_actions_id = step.github_actions_id
+            break
+
+    if not github_actions_id:
+        return {
+            "success": False,
+            "error": "GitHub Actions run ID not available for this staging run",
+            "applied_prs": [],
+        }
+
+    github_token = get_setting(GITHUB_TOKEN)
+    if not github_token:
+        return {
+            "success": False,
+            "error": "GitHub token not configured",
+            "applied_prs": [],
+        }
+
+    try:
+        from github_integration import GitHubWorkflowManager
+
+        github_manager = GitHubWorkflowManager(github_token)
+        applied_prs = await github_manager.get_applied_prs_from_logs(
+            str(github_actions_id)
+        )
+
+        return {
+            "success": True,
+            "github_actions_id": str(github_actions_id),
+            "applied_prs": applied_prs,
+        }
+    except Exception as e:
+        print(f"Error extracting tested PRs: {e}")
+        return {
+            "success": False,
+            "error": f"Failed to extract tested PRs: {str(e)}",
+            "applied_prs": [],
+        }
+
+
 @app.post("/staging/{run_id}/cancel")
 async def cancel_staging_run(
     run_id: int,
