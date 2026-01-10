@@ -518,13 +518,6 @@ function renderTestedPrsList(prs) {
             </div>
         `;
 
-        if (treeUrl) {
-            const treeLink = document.createElement('div');
-            treeLink.className = 'small text-muted mt-1';
-            treeLink.innerHTML = `Tree: <a href="${treeUrl}" target="_blank" class="text-decoration-none">${treeUrl}</a>`;
-            item.appendChild(treeLink);
-        }
-
         list.appendChild(item);
     });
 }
