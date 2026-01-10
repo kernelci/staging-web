@@ -7,8 +7,12 @@ import os
 import json
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from typing import List
 from contextlib import asynccontextmanager
+from urllib.parse import quote
+
+import aiohttp
 from fastapi import (
     FastAPI,
     Request,
@@ -63,8 +67,10 @@ from discord_webhook import configure_discord_webhook, discord_webhook
 from db_constraints import (
     validate_single_running_staging,
     enforce_single_running_staging,
+    get_running_staging_count,
 )
 from scheduler import register_cron_jobs
+from github_integration import GitHubWorkflowManager
 
 
 # Pydantic models for API requests
@@ -80,7 +86,7 @@ init_db()
 configure_discord_webhook(get_setting(DISCORD_WEBHOOK_URL))
 
 # Import orchestrator after database is initialized
-from orchestrator import orchestrator
+from orchestrator import orchestrator, StagingOrchestrator
 
 
 # Background task to run orchestrator
@@ -98,8 +104,6 @@ async def run_orchestrator():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    from orchestrator import StagingOrchestrator
-
     orchestrator = StagingOrchestrator()
 
     # Run startup recovery to handle steps that can't survive restart
@@ -168,7 +172,6 @@ def get_real_ip(request: Request) -> str:
 @app.get("/ajax.png")
 async def get_ajax_icon():
     """Serve the AJAX loading icon directly"""
-    import os
 
     file_path = os.path.join(os.path.dirname(__file__), "templates", "ajax.png")
     return FileResponse(file_path, media_type="image/png")
@@ -177,7 +180,6 @@ async def get_ajax_icon():
 @app.get("/robots.txt")
 async def get_robots_txt():
     """Serve robots.txt to deny all crawlers"""
-    import os
 
     file_path = os.path.join(os.path.dirname(__file__), "robots.txt")
     return FileResponse(file_path, media_type="text/plain")
@@ -890,9 +892,6 @@ async def get_staging_nodes(
 
     # Fetch nodes from KernelCI staging API
     try:
-        import aiohttp
-        from urllib.parse import quote
-
         api_url = f"https://staging.kernelci.org:9000/latest/nodes?treeid={quote(staging_run.treeid)}&limit=10000"
 
         async with aiohttp.ClientSession() as session:
@@ -1004,8 +1003,6 @@ async def get_staging_tested_prs(
         }
 
     try:
-        from github_integration import GitHubWorkflowManager
-
         github_manager = GitHubWorkflowManager(github_token)
         applied_prs = await github_manager.get_applied_prs_from_logs(
             str(github_actions_id)
@@ -1066,9 +1063,6 @@ async def cancel_staging_run(
 
     try:
         # Cancel any running GitHub workflows
-        from github_integration import GitHubWorkflowManager
-        from settings import get_setting, GITHUB_TOKEN
-
         # Find GitHub workflow steps that might need cancellation
         for step in staging_run.steps:
             if (
@@ -1149,9 +1143,6 @@ async def get_changelog(current_user: User = Depends(get_current_user_optional))
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    import os
-    from pathlib import Path
-
     # Look for CHANGELOG.md in the current directory
     changelog_path = Path("CHANGELOG.md")
 
@@ -1191,9 +1182,6 @@ async def get_staging_status(
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    from db_constraints import get_running_staging_count
-    from datetime import datetime
-
     running_staging = validate_single_running_staging(db)
     running_count = get_running_staging_count(db)
 
@@ -1228,8 +1216,6 @@ async def check_workflow_status(
         }
 
     try:
-        from github_integration import GitHubWorkflowManager
-
         github_manager = GitHubWorkflowManager(github_token)
         running_workflows = await github_manager.get_running_workflows()
 
