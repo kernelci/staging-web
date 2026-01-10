@@ -499,8 +499,8 @@ function renderTestedPrsList(prs) {
 
     prs.forEach(pr => {
         const prNumber = pr.pr || 'unknown';
-        const prUrl = pr.pr_url || '#';
         const repo = pr.apply_repo || pr.tree_repo || 'unknown repo';
+        const prUrl = repo !== 'unknown repo' ? `https://github.com/${repo}/pull/${prNumber}` : '#';
         const branch = pr.apply_branch || 'unknown branch';
         const treeUrl = pr.apply_tree_url || pr.tree_url;
 
