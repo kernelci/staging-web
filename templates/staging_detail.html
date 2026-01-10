@@ -201,6 +201,47 @@
                     {% endfor %}
                 </div>
 
+                <!-- Tested PRs Section -->
+                <div class="mt-4">
+                    <div class="card" id="testedPrsCard">
+                        <div class="card-header" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#testedPrsContent" aria-expanded="false">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-code-branch me-2"></i>Tested PRs
+                                </h6>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-primary me-2" id="refreshTestedPrsBtn" onclick="loadTestedPrs()">
+                                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                                    </button>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="collapse" id="testedPrsContent">
+                            <div class="card-body">
+                                <div id="testedPrsLoading" class="text-center py-3" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin fa-2x text-primary mb-2"></i>
+                                    <p class="text-muted">Loading tested PRs...</p>
+                                </div>
+
+                                <div id="testedPrsError" class="alert alert-danger" style="display: none;">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    <span id="testedPrsErrorMessage"></span>
+                                </div>
+
+                                <div id="testedPrsEmpty" class="alert alert-info" style="display: none;">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    No applied PRs found in the workflow logs.
+                                </div>
+
+                                <div id="testedPrsData" style="display: none;">
+                                    <div class="list-group" id="testedPrsList"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Node Results Section -->
                 <div class="mt-4">
                     <div class="card" id="nodeResultsCard">
@@ -438,6 +479,118 @@ setInterval(updateStepStatus, 15000);
 {% endif %}
 
 <script>
+// Tested PRs functionality
+function hideAllTestedPrsStates() {
+    document.getElementById('testedPrsLoading').style.display = 'none';
+    document.getElementById('testedPrsError').style.display = 'none';
+    document.getElementById('testedPrsEmpty').style.display = 'none';
+    document.getElementById('testedPrsData').style.display = 'none';
+}
+
+function showTestedPrsError(message) {
+    hideAllTestedPrsStates();
+    document.getElementById('testedPrsErrorMessage').textContent = message;
+    document.getElementById('testedPrsError').style.display = 'block';
+}
+
+function renderTestedPrsList(prs) {
+    const list = document.getElementById('testedPrsList');
+    list.innerHTML = '';
+
+    prs.forEach(pr => {
+        const prNumber = pr.pr || 'unknown';
+        const prUrl = pr.pr_url || '#';
+        const repo = pr.apply_repo || pr.tree_repo || 'unknown repo';
+        const branch = pr.apply_branch || 'unknown branch';
+        const treeUrl = pr.apply_tree_url || pr.tree_url;
+
+        const item = document.createElement('a');
+        item.className = 'list-group-item list-group-item-action';
+        item.href = prUrl;
+        item.target = '_blank';
+        item.innerHTML = `
+            <div class="d-flex w-100 justify-content-between align-items-center">
+                <div>
+                    <strong>PR ${prNumber}</strong>
+                    <div class="small text-muted">${repo} @ ${branch}</div>
+                </div>
+                <span class="badge bg-success">Applied</span>
+            </div>
+        `;
+
+        if (treeUrl) {
+            const treeLink = document.createElement('div');
+            treeLink.className = 'small text-muted mt-1';
+            treeLink.innerHTML = `Tree: <a href="${treeUrl}" target="_blank" class="text-decoration-none">${treeUrl}</a>`;
+            item.appendChild(treeLink);
+        }
+
+        list.appendChild(item);
+    });
+}
+
+async function loadTestedPrs() {
+    const runId = {{ staging_run.id }};
+    const refreshBtn = document.getElementById('refreshTestedPrsBtn');
+
+    hideAllTestedPrsStates();
+    document.getElementById('testedPrsLoading').style.display = 'block';
+
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Loading...';
+    }
+
+    try {
+        const response = await fetch(`/api/staging/${runId}/tested-prs`);
+        if (!response.ok) {
+            if (response.status === 401) {
+                showTestedPrsError('Authentication required. Please log in again.');
+                return;
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+            showTestedPrsError(data.error || 'Failed to load tested PRs');
+            return;
+        }
+
+        if (!data.applied_prs || data.applied_prs.length === 0) {
+            hideAllTestedPrsStates();
+            document.getElementById('testedPrsEmpty').style.display = 'block';
+            return;
+        }
+
+        renderTestedPrsList(data.applied_prs);
+        hideAllTestedPrsStates();
+        document.getElementById('testedPrsData').style.display = 'block';
+    } catch (error) {
+        console.error('Error loading tested PRs:', error);
+        showTestedPrsError(`Failed to load tested PRs: ${error.message}`);
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refresh';
+        }
+    }
+}
+
+document.getElementById('testedPrsContent').addEventListener('show.bs.collapse', function() {
+    const dataElement = document.getElementById('testedPrsData');
+    const loadingElement = document.getElementById('testedPrsLoading');
+    const emptyElement = document.getElementById('testedPrsEmpty');
+    const errorElement = document.getElementById('testedPrsError');
+
+    if (dataElement.style.display === 'none' &&
+        loadingElement.style.display === 'none' &&
+        emptyElement.style.display === 'none' &&
+        errorElement.style.display === 'none') {
+        loadTestedPrs();
+    }
+});
+
 // Node Results functionality
 let countdownInterval = null;
 
