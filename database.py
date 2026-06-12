@@ -46,6 +46,12 @@ def run_migrations():
             "type": "TEXT",
             "description": "Tree ID from KernelCI checkout node",
         },
+        {
+            "table": "users",
+            "column": "github_id",
+            "type": "INTEGER",
+            "description": "GitHub account id for OAuth logins",
+        },
         # Add future migrations here
     ]
 
@@ -76,6 +82,20 @@ def run_migrations():
                     print(f"✓ {column_name} column already exists in {table_name}")
             else:
                 print(f"✓ {table_name} table will be created by SQLAlchemy")
+
+        # ALTER TABLE cannot add a unique constraint in SQLite, so create
+        # the index explicitly for databases migrated from older schemas
+        if "users" in table_names:
+            try:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_github_id "
+                        "ON users (github_id)"
+                    )
+                )
+                conn.commit()
+            except Exception as e:
+                print(f"✗ Error creating github_id index: {e}")
 
     print("Database migration check completed")
 

@@ -67,6 +67,8 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.VIEWER)
     email = Column(String, nullable=True)
+    # GitHub account id for OAuth logins (numeric id is stable, unlike login)
+    github_id = Column(Integer, unique=True, index=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

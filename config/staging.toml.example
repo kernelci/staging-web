@@ -40,6 +40,18 @@ repo = "kernelci/kernelci-core"
 workflow = "staging.yml"
 ref = "main"
 
+# GitHub OAuth login (optional). Register an OAuth App with callback URL
+# https://<host>/auth/github/callback and set the credentials below.
+# Only members of the configured org team are allowed to log in.
+[github_oauth]
+enabled = false
+client_id = ""
+client_secret = ""
+org = "kernelci"
+team = "staging"
+# Role assigned to users created via OAuth: admin, maintainer or viewer
+member_role = "maintainer"
+
 [orchestrator]
 interval_seconds = 60
 workflow_timeout_minutes = 60

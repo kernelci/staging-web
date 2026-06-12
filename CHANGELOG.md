@@ -2,6 +2,18 @@
 
 All notable changes to the KernelCI Staging Control application will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **GitHub OAuth Login**: Added optional "Sign in with GitHub" on the login page
+  - Access restricted to members of a GitHub team (default `kernelci/staging`,
+    configurable via the `[github_oauth]` section in `staging.toml`)
+  - User accounts are created automatically on first login with a configurable
+    role (default `maintainer`); existing local accounts with a matching
+    username are linked and keep their role
+  - Database migration adds a `github_id` column to users
+
 ## [0.2.0]
 
 ### Added

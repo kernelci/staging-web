@@ -73,6 +73,15 @@ AUTO_REFRESH_INTERVAL_SECONDS = config["ui"]["auto_refresh_interval_seconds"]
 AJAX_UPDATE_INTERVAL_SECONDS = config["ui"]["ajax_update_interval_seconds"]
 MAX_RECENT_RUNS = config["ui"]["max_recent_runs"]
 
+# GitHub OAuth Configuration (optional section)
+_github_oauth = config.get("github_oauth", {})
+GITHUB_OAUTH_ENABLED = _github_oauth.get("enabled", False)
+GITHUB_OAUTH_CLIENT_ID = _github_oauth.get("client_id", "")
+GITHUB_OAUTH_CLIENT_SECRET = _github_oauth.get("client_secret", "")
+GITHUB_OAUTH_ORG = _github_oauth.get("org", "kernelci")
+GITHUB_OAUTH_TEAM = _github_oauth.get("team", "staging")
+GITHUB_OAUTH_MEMBER_ROLE = _github_oauth.get("member_role", "maintainer")
+
 # Default User Configuration
 DEFAULT_ADMIN_USERNAME = config["default_admin"]["username"]
 DEFAULT_ADMIN_PASSWORD = config["default_admin"]["password"]

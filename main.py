@@ -6,6 +6,7 @@
 import os
 import json
 import asyncio
+import secrets
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -20,6 +21,7 @@ from fastapi import (
     HTTPException,
     status,
     Form,
+    Cookie,
     BackgroundTasks,
 )
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
@@ -37,6 +39,10 @@ from config import (
     ORCHESTRATOR_INTERVAL_SECONDS,
     MAX_RECENT_RUNS,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    GITHUB_OAUTH_ENABLED,
+    GITHUB_OAUTH_ORG,
+    GITHUB_OAUTH_TEAM,
+    GITHUB_OAUTH_MEMBER_ROLE,
 )
 
 from database import SessionLocal, engine, init_db
@@ -71,6 +77,7 @@ from db_constraints import (
 )
 from scheduler import register_cron_jobs
 from github_integration import GitHubWorkflowManager
+import github_oauth
 
 
 # Pydantic models for API requests
@@ -359,9 +366,20 @@ async def get_staging_run_status(
     }
 
 
+def login_response(request: Request, error: str = None):
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "error": error,
+            "github_oauth_enabled": GITHUB_OAUTH_ENABLED,
+        },
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return login_response(request)
 
 
 @app.post("/login")
@@ -376,9 +394,7 @@ async def login(
     user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password, user.password_hash):
         print(f"Failed login attempt for user '{username}' from IP {real_ip}")
-        return templates.TemplateResponse(
-            "login.html", {"request": request, "error": "Invalid username or password"}
-        )
+        return login_response(request, "Invalid username or password")
 
     print(f"Successful login for user '{username}' from IP {real_ip}")
 
@@ -404,6 +420,103 @@ async def login(
 async def logout():
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key="access_token")
+    return response
+
+
+@app.get("/auth/github")
+async def github_oauth_start():
+    if not GITHUB_OAUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="GitHub OAuth is not enabled")
+
+    state = github_oauth.generate_state()
+    response = RedirectResponse(github_oauth.build_authorize_url(state))
+    # samesite must be lax: the callback arrives as a cross-site
+    # top-level redirect from github.com
+    response.set_cookie(
+        key=github_oauth.OAUTH_STATE_COOKIE,
+        value=state,
+        httponly=True,
+        max_age=600,
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/auth/github/callback")
+async def github_oauth_callback(
+    request: Request,
+    code: str = None,
+    state: str = None,
+    error: str = None,
+    oauth_state: str = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    if not GITHUB_OAUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="GitHub OAuth is not enabled")
+
+    real_ip = get_real_ip(request)
+
+    if error or not code:
+        return login_response(request, "GitHub authentication was cancelled or failed")
+
+    if not github_oauth.validate_state(state, oauth_state):
+        print(f"GitHub OAuth invalid state from IP {real_ip}")
+        return login_response(request, "Invalid OAuth state, please try again")
+
+    gh_token = await github_oauth.exchange_code(code)
+    if not gh_token:
+        print(f"GitHub OAuth code exchange failed from IP {real_ip}")
+        return login_response(request, "GitHub authentication failed")
+
+    gh_user = await github_oauth.fetch_github_user(gh_token)
+    if not gh_user or not gh_user.get("login") or not gh_user.get("id"):
+        return login_response(request, "Could not fetch GitHub user profile")
+
+    gh_login = gh_user["login"]
+    gh_id = gh_user["id"]
+
+    if not await github_oauth.is_team_member(gh_token, gh_login):
+        print(
+            f"GitHub OAuth denied for '{gh_login}' from IP {real_ip}: "
+            f"not a member of {GITHUB_OAUTH_ORG}/{GITHUB_OAUTH_TEAM}"
+        )
+        return login_response(
+            request,
+            f"Access denied: you must be a member of the "
+            f"{GITHUB_OAUTH_ORG}/{GITHUB_OAUTH_TEAM} team",
+        )
+
+    user = db.query(User).filter(User.github_id == gh_id).first()
+    if not user:
+        email = await github_oauth.fetch_primary_email(gh_token)
+        # Link an existing local account with a matching username,
+        # otherwise create a new one with the configured role
+        user = db.query(User).filter(User.username == gh_login).first()
+        if user:
+            user.github_id = gh_id
+        else:
+            user = User(
+                username=gh_login,
+                # OAuth users have no usable password
+                password_hash=get_password_hash(secrets.token_urlsafe(32)),
+                role=UserRole(GITHUB_OAUTH_MEMBER_ROLE),
+                email=email or gh_user.get("email"),
+                github_id=gh_id,
+            )
+            db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    print(
+        f"Successful GitHub OAuth login for user '{user.username}' from IP {real_ip}"
+    )
+
+    access_token = create_access_token(data={"sub": user.username})
+    response = RedirectResponse(url="/", status_code=302)
+    response.set_cookie(
+        key="access_token", value=f"Bearer {access_token}", httponly=True
+    )
+    response.delete_cookie(key=github_oauth.OAUTH_STATE_COOKIE)
     return response
 
 

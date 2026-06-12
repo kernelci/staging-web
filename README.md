@@ -32,3 +32,27 @@ without requiring ssh privileges to staging server.
 *   **Password:** admin
 
 It is recommended to change the admin password after the first login.
+
+## GitHub OAuth Login
+
+Optionally, users can log in with their GitHub account. Access is restricted
+to members of a GitHub team — by default the `staging` team of the `kernelci`
+organization.
+
+1.  Register a GitHub OAuth App (Settings → Developer settings → OAuth Apps)
+    with the authorization callback URL set to
+    `https://<your-host>/auth/github/callback`.
+2.  Configure the `[github_oauth]` section in `config/staging.toml`:
+    ```toml
+    [github_oauth]
+    enabled = true
+    client_id = "<client id>"
+    client_secret = "<client secret>"
+    org = "kernelci"        # GitHub organization
+    team = "staging"        # team slug whose members are allowed
+    member_role = "maintainer"  # role for users created via OAuth
+    ```
+
+On first login a user account is created automatically with the configured
+role. If a local account with the same username already exists, it is linked
+to the GitHub account and keeps its existing role.
