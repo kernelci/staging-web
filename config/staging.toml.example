@@ -86,6 +86,6 @@ tag_prefix = "staging-mainline-"
 
 [kernel_trees.stable]
 url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git"
-branch = "linux-6.13.y"
+branch = "linux-6.18.y"
 staging_branch = "staging-stable"
 tag_prefix = "staging-stable-"
